@@ -13,8 +13,9 @@ classifiers = [
 ]
 
 dependencies = [
-"click >=8.0.1",
-"nox",
+    "click >=8.0.1",
+    "nox",
+    "skypilot[nebius]>=0.8.1",
 ]
 
 
