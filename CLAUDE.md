@@ -235,3 +235,7 @@ def get_workflow(workflow_type: str):
 3. **Don't catch all exceptions** - Let SkyPilot errors bubble up with context
 4. **Don't hardcode regions** - Make Nebius regions configurable
 5. **Don't skip validation** - Always validate model/dataset compatibility
+
+## Task Master AI Instructions
+**Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**
+@./.taskmaster/CLAUDE.md

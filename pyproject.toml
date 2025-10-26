@@ -3,7 +3,7 @@ name = "vibeml"
 version = "0.0.1"
 description = "vibeml"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
   {name = "Prass, The Nomadic Coder", email = "me@prassanna.io"},
@@ -16,6 +16,9 @@ dependencies = [
     "click >=8.0.1",
     "nox",
     "skypilot[nebius]>=0.8.1",
+    "fastmcp>=0.1.0",
+    "pydantic>=2.0.0",
+    "cryptography>=41.0.0",
 ]
 
 

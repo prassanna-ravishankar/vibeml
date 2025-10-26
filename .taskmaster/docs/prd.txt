@@ -1,0 +1,998 @@
+# VibeML: Conversational AI Training Platform - PRD
+
+<overview>
+
+## Problem Statement
+
+Current AI model training is inaccessible to most developers due to complex multi-cloud GPU management requiring DevOps expertise. Developers face three critical pain points:
+
+1. **Setup Complexity**: Configuring cloud GPU infrastructure requires deep knowledge of cloud providers, instance types, networking, and orchestration tools
+2. **Cost Inefficiency**: Without expertise in spot instances, regional pricing, and GPU selection, users overpay 5-10x for training jobs
+3. **Reliability Issues**: Manual handling of spot instance preemptions, capacity issues, and failures leads to interrupted training runs and wasted compute
+
+Existing solutions are fragmented - requiring separate tools for orchestration (Kubernetes, Ray), monitoring (TensorBoard, W&B), and cost tracking (CloudHealth, Infracost). This forces developers to become cloud infrastructure experts before they can train their first model.
+
+## Target Users
+
+**Persona 1: ML Researcher**
+- **Workflow**: Rapid experimentation with 7B-13B models, budget-conscious
+- **Goal**: "I want to test 5 different fine-tuning approaches this week without cloud configuration overhead"
+- **Pain Point**: Spending hours setting up infrastructure for 2-hour training runs
+
+**Persona 2: Startup AI Engineer**
+- **Workflow**: Production model training with quality/cost balance
+- **Goal**: "Deploy fine-tuned models reliably while keeping infrastructure costs predictable"
+- **Pain Point**: Overpaying for on-demand GPUs or dealing with spot preemptions manually
+
+**Persona 3: Enterprise ML Team**
+- **Workflow**: Large-scale distributed training with governance requirements
+- **Goal**: "Train multiple models across teams with cost attribution and policy enforcement"
+- **Pain Point**: Complex multi-cloud policies and manual cost allocation
+
+**Persona 4: Student/Learner**
+- **Workflow**: Learning ML with minimal budget
+- **Goal**: "Run training tutorials on real GPUs without breaking the bank"
+- **Pain Point**: $100/month cloud bill from inefficient resource usage
+
+## Success Metrics
+
+- **Accessibility**: 90% of users launch their first training job within 5 minutes of installation
+- **Cost Optimization**: Users achieve 5x cost reduction vs manual cloud setup through spot instances and optimal GPU selection
+- **Reliability**: 95% training job success rate with automatic failover handling
+- **Time to Value**: <30 seconds from natural language request to job launch
+- **User Satisfaction**: 80% of users prefer conversational interface over CLI/web consoles
+
+</overview>
+
+---
+
+<functional-decomposition>
+
+## Capability Tree
+
+### Capability: MCP Server Interface
+Provides conversational interface for AI assistants (Claude, ChatGPT) to interact with VibeML through standardized Model Context Protocol.
+
+#### Feature: Tool Registration
+- **Description**: Register VibeML tools (launch, status, logs) with MCP protocol
+- **Inputs**: Tool definitions (name, parameters, descriptions)
+- **Outputs**: MCP-compliant tool registry
+- **Behavior**: FastMCP server exposes tools to AI assistants with type validation
+
+#### Feature: Request Validation
+- **Description**: Validate incoming MCP requests against Pydantic schemas
+- **Inputs**: Raw MCP request JSON
+- **Outputs**: Validated request object or validation errors
+- **Behavior**: Check required fields, types, and constraints; return clear error messages
+
+#### Feature: Response Formatting
+- **Description**: Format operation results into MCP-compliant responses
+- **Inputs**: Operation results (cluster info, status, errors)
+- **Outputs**: JSON response following MCP schema
+- **Behavior**: Structure data with proper types and include error details when applicable
+
+### Capability: Training Job Management
+Core orchestration of ML training jobs from request to completion, handling lifecycle and state management.
+
+#### Feature: Job Launch
+- **Description**: Create and launch training jobs on cloud infrastructure
+- **Inputs**: Model name, dataset, workflow type, GPU preferences
+- **Outputs**: Cluster handle, job ID, estimated cost
+- **Behavior**: Generate SkyPilot task, validate resources, launch cluster, return tracking info
+
+#### Feature: Job Status Tracking
+- **Description**: Query current state of running or completed jobs
+- **Inputs**: Job ID or cluster name
+- **Outputs**: Status (running/completed/failed), progress metrics, resource usage
+- **Behavior**: Poll SkyPilot cluster status, parse logs for training progress
+
+#### Feature: Job Termination
+- **Description**: Gracefully stop running jobs and cleanup resources
+- **Inputs**: Job ID, cleanup flag (delete cluster vs preserve)
+- **Outputs**: Termination confirmation, final cost
+- **Behavior**: Stop training process, optionally save checkpoint, tear down cluster
+
+#### Feature: Log Retrieval
+- **Description**: Stream or fetch logs from running/completed jobs
+- **Inputs**: Job ID, log type (stdout/stderr/training metrics)
+- **Outputs**: Log content, timestamps
+- **Behavior**: Fetch logs from SkyPilot, parse training framework outputs
+
+### Capability: Task Generation
+Converts high-level training requests into executable SkyPilot Task objects without template intermediaries.
+
+#### Feature: Unsloth Task Creation
+- **Description**: Generate SkyPilot task for efficient 4-bit LoRA fine-tuning
+- **Inputs**: Model ID, dataset ID, hyperparameters (learning rate, batch size, steps)
+- **Outputs**: Configured SkyPilot Task object
+- **Behavior**: Build setup script (install Unsloth), run script (training code), configure resources
+
+#### Feature: Parameter Validation
+- **Description**: Validate training parameters before task generation
+- **Inputs**: Raw parameters from user request
+- **Outputs**: Validated parameters or error details
+- **Behavior**: Check model exists on HuggingFace, dataset accessible, GPU has sufficient memory
+
+#### Feature: Resource Configuration
+- **Description**: Configure cloud resources (GPU type, region, spot/on-demand)
+- **Inputs**: GPU preference, cloud provider, budget constraints
+- **Outputs**: SkyPilot Resources object
+- **Behavior**: Map user preferences to cloud-specific configurations, optimize for cost
+
+#### Feature: Script Generation
+- **Description**: Generate setup and training scripts from parameters
+- **Inputs**: Workflow type, model, dataset, hyperparameters
+- **Outputs**: Setup script (bash), training script (Python)
+- **Behavior**: Template Python training code with parameter substitution, include checkpointing
+
+### Capability: Workflow Registry
+Manages collection of training workflows (Unsloth, LoRA, full fine-tuning) with extensible plugin architecture.
+
+#### Feature: Workflow Registration
+- **Description**: Register workflow creation functions in central registry
+- **Inputs**: Workflow name, creation function, metadata (GPU requirements, supported models)
+- **Outputs**: Updated workflow registry
+- **Behavior**: Store workflow functions in dict, validate function signature
+
+#### Feature: Workflow Selection
+- **Description**: Select appropriate workflow based on user request
+- **Inputs**: Model size, budget, quality requirements, time constraints
+- **Outputs**: Selected workflow name and creation function
+- **Behavior**: Match requirements to workflow capabilities, prioritize by cost/quality trade-off
+
+#### Feature: Workflow Metadata
+- **Description**: Provide workflow information for recommendation engine
+- **Inputs**: Workflow name
+- **Outputs**: Workflow metadata (cost range, typical duration, GPU requirements)
+- **Behavior**: Return structured metadata for AI assistant context
+
+### Capability: Cloud Integration
+Abstracts multi-cloud operations through SkyPilot, handling provider-specific configurations and optimizations.
+
+#### Feature: SkyPilot Task Execution
+- **Description**: Execute SkyPilot tasks asynchronously without blocking
+- **Inputs**: SkyPilot Task object, cluster name
+- **Outputs**: Cluster handle, execution status
+- **Behavior**: Wrap sky.launch() with FastMCP async decorators, handle timeouts
+
+#### Feature: Nebius Cloud Configuration
+- **Description**: Configure Nebius-specific resources and authentication
+- **Inputs**: GPU type, region, instance type preferences
+- **Outputs**: Nebius-compatible SkyPilot Resources
+- **Behavior**: Map generic GPU types to Nebius instances, set regions, configure IAM
+
+#### Feature: Cost Estimation
+- **Description**: Estimate training job cost before launch
+- **Inputs**: GPU type, estimated duration, spot vs on-demand
+- **Outputs**: Cost estimate (min/max/expected), hourly rate
+- **Behavior**: Query cloud pricing APIs, factor in spot discounts, add buffer for setup time
+
+#### Feature: Error Translation
+- **Description**: Convert SkyPilot/cloud errors into user-friendly messages
+- **Inputs**: Exception from SkyPilot or cloud provider
+- **Outputs**: Structured error with actionable advice
+- **Behavior**: Pattern match error types, suggest fixes (change region, increase quota, try different GPU)
+
+### Capability: Configuration Management
+Handles user preferences, cloud credentials, and system settings with secure storage and validation.
+
+#### Feature: Credential Storage
+- **Description**: Securely store and retrieve cloud provider credentials
+- **Inputs**: Provider name, API key/secret
+- **Outputs**: Encrypted credentials, retrieval handle
+- **Behavior**: Encrypt sensitive data, store in user config directory, validate on retrieval
+
+#### Feature: Preference Management
+- **Description**: Store user preferences for defaults (GPU type, region, budget limits)
+- **Inputs**: Preference key-value pairs
+- **Outputs**: Updated configuration file
+- **Behavior**: Merge with existing config, validate constraints, persist to disk
+
+#### Feature: Budget Controls
+- **Description**: Enforce budget limits and spending caps
+- **Inputs**: Budget limit, current spending, job cost estimate
+- **Outputs**: Approval/rejection decision
+- **Behavior**: Check if job cost + current spending exceeds limit, prompt for confirmation
+
+### Capability: Error Handling
+Provides comprehensive error handling with custom exception hierarchy and recovery strategies.
+
+#### Feature: Exception Classification
+- **Description**: Classify errors by type and severity
+- **Inputs**: Exception object, context (which operation failed)
+- **Outputs**: Error category, severity level, recovery suggestion
+- **Behavior**: Match exception types to categories (validation, resource, cloud provider)
+
+#### Feature: Recovery Strategies
+- **Description**: Attempt automatic recovery from transient failures
+- **Inputs**: Error type, failed operation context
+- **Outputs**: Recovery action (retry, fallback, abort)
+- **Behavior**: Retry with backoff for transient errors, suggest alternatives for capacity issues
+
+#### Feature: Error Reporting
+- **Description**: Format errors for user presentation via MCP
+- **Inputs**: Exception, user context (request that triggered error)
+- **Outputs**: Formatted error message with actionable guidance
+- **Behavior**: Include error type, root cause, suggested fix, relevant documentation links
+
+</functional-decomposition>
+
+---
+
+<structural-decomposition>
+
+## Repository Structure
+
+```
+vibeml/
+├── src/
+│   └── vibeml/
+│       ├── __init__.py              # Package exports
+│       ├── __main__.py              # CLI entry point
+│       ├── server/                  # Maps to: MCP Server Interface
+│       │   ├── __init__.py          # Server initialization
+│       │   ├── mcp_server.py        # Tool registration
+│       │   ├── validators.py        # Request validation
+│       │   └── formatters.py        # Response formatting
+│       ├── jobs/                    # Maps to: Training Job Management
+│       │   ├── __init__.py
+│       │   ├── launcher.py          # Job launch
+│       │   ├── tracker.py           # Status tracking
+│       │   ├── terminator.py        # Job termination
+│       │   └── logs.py              # Log retrieval
+│       ├── tasks/                   # Maps to: Task Generation
+│       │   ├── __init__.py
+│       │   ├── unsloth.py           # Unsloth workflow
+│       │   ├── validation.py        # Parameter validation
+│       │   ├── resources.py         # Resource configuration
+│       │   └── scripts.py           # Script generation
+│       ├── workflows/               # Maps to: Workflow Registry
+│       │   ├── __init__.py
+│       │   ├── registry.py          # Workflow registration
+│       │   ├── selector.py          # Workflow selection
+│       │   └── metadata.py          # Workflow metadata
+│       ├── cloud/                   # Maps to: Cloud Integration
+│       │   ├── __init__.py
+│       │   ├── skypilot_wrapper.py  # SkyPilot execution
+│       │   ├── nebius.py            # Nebius configuration
+│       │   ├── cost_estimator.py    # Cost estimation
+│       │   └── error_translator.py  # Error translation
+│       ├── config/                  # Maps to: Configuration Management
+│       │   ├── __init__.py
+│       │   ├── credentials.py       # Credential storage
+│       │   ├── preferences.py       # Preference management
+│       │   └── budget.py            # Budget controls
+│       └── exceptions.py            # Maps to: Error Handling
+├── tests/
+│   ├── test_server/
+│   ├── test_jobs/
+│   ├── test_tasks/
+│   ├── test_workflows/
+│   ├── test_cloud/
+│   ├── test_config/
+│   └── test_exceptions.py
+├── docs/
+├── pyproject.toml
+├── noxfile.py
+└── README.md
+```
+
+## Module Definitions
+
+### Module: server
+- **Maps to capability**: MCP Server Interface
+- **Responsibility**: Handle MCP protocol communication with AI assistants
+- **File structure**:
+  ```
+  server/
+  ├── mcp_server.py    # FastMCP server, tool registration
+  ├── validators.py    # Pydantic models for request validation
+  └── formatters.py    # MCP response formatting
+  ```
+- **Exports**:
+  - `create_mcp_server()` - Initialize FastMCP server with tools
+  - `validate_request(request: dict) -> TrainingRequest` - Validate MCP request
+  - `format_response(result: Any) -> dict` - Format operation result
+
+### Module: jobs
+- **Maps to capability**: Training Job Management
+- **Responsibility**: Orchestrate training job lifecycle
+- **File structure**:
+  ```
+  jobs/
+  ├── launcher.py      # Launch jobs
+  ├── tracker.py       # Track status
+  ├── terminator.py    # Terminate jobs
+  └── logs.py          # Retrieve logs
+  ```
+- **Exports**:
+  - `launch_job(task: Task) -> JobHandle` - Launch training job
+  - `get_job_status(job_id: str) -> JobStatus` - Query job state
+  - `terminate_job(job_id: str) -> None` - Stop job
+  - `get_logs(job_id: str) -> List[str]` - Fetch logs
+
+### Module: tasks
+- **Maps to capability**: Task Generation
+- **Responsibility**: Generate SkyPilot Task objects for training workflows
+- **File structure**:
+  ```
+  tasks/
+  ├── unsloth.py       # Unsloth workflow task generator
+  ├── validation.py    # Parameter validation
+  ├── resources.py     # Resource configuration
+  └── scripts.py       # Training script generation
+  ```
+- **Exports**:
+  - `create_unsloth_task(model, dataset, **kwargs) -> Task` - Generate Unsloth task
+  - `validate_parameters(params: dict) -> ValidationResult` - Validate inputs
+  - `configure_resources(gpu_type, cloud) -> Resources` - Build resources config
+  - `generate_training_script(workflow, params) -> str` - Generate Python script
+
+### Module: workflows
+- **Maps to capability**: Workflow Registry
+- **Responsibility**: Manage and select training workflows
+- **File structure**:
+  ```
+  workflows/
+  ├── registry.py      # Workflow registration
+  ├── selector.py      # Workflow selection logic
+  └── metadata.py      # Workflow metadata
+  ```
+- **Exports**:
+  - `register_workflow(name: str, func: Callable) -> None` - Register workflow
+  - `select_workflow(requirements: dict) -> str` - Choose workflow
+  - `get_workflow_metadata(name: str) -> WorkflowMetadata` - Get workflow info
+
+### Module: cloud
+- **Maps to capability**: Cloud Integration
+- **Responsibility**: Abstract cloud operations through SkyPilot
+- **File structure**:
+  ```
+  cloud/
+  ├── skypilot_wrapper.py  # Async SkyPilot execution
+  ├── nebius.py            # Nebius-specific config
+  ├── cost_estimator.py    # Cost estimation
+  └── error_translator.py  # Cloud error translation
+  ```
+- **Exports**:
+  - `launch_skypilot_task(task: Task) -> Cluster` - Execute SkyPilot task
+  - `configure_nebius(gpu: str, region: str) -> Resources` - Nebius config
+  - `estimate_cost(resources: Resources, duration: int) -> CostEstimate` - Estimate cost
+  - `translate_error(exc: Exception) -> UserFriendlyError` - Convert errors
+
+### Module: config
+- **Maps to capability**: Configuration Management
+- **Responsibility**: Handle credentials, preferences, and budgets
+- **File structure**:
+  ```
+  config/
+  ├── credentials.py   # Secure credential storage
+  ├── preferences.py   # User preferences
+  └── budget.py        # Budget enforcement
+  ```
+- **Exports**:
+  - `store_credentials(provider: str, creds: dict) -> None` - Save credentials
+  - `get_credentials(provider: str) -> dict` - Retrieve credentials
+  - `save_preferences(prefs: dict) -> None` - Save user preferences
+  - `check_budget(cost: float) -> bool` - Verify budget compliance
+
+### Module: exceptions
+- **Maps to capability**: Error Handling
+- **Responsibility**: Custom exception hierarchy and error recovery
+- **File structure**:
+  ```
+  exceptions.py        # All exception classes and recovery strategies
+  ```
+- **Exports**:
+  - `VibeMLError` - Base exception class
+  - `SkyPilotError` - SkyPilot operation failures
+  - `NebiusError` - Nebius-specific errors
+  - `ResourceError` - Resource allocation failures
+  - `ConfigurationError` - Invalid configuration
+  - `BudgetExceededError` - Budget limit violations
+
+</structural-decomposition>
+
+---
+
+<dependency-graph>
+
+## Dependency Chain
+
+### Foundation Layer (Phase 0)
+No dependencies - these are built first.
+
+- **exceptions**: Provides base exception classes for all modules
+- **config**: Manages credentials and preferences (no dependencies on other modules)
+
+### Data Layer (Phase 1)
+- **tasks/validation**: Depends on [exceptions] - validates parameters, raises ConfigurationError
+- **tasks/resources**: Depends on [exceptions] - configures resources, raises ResourceError
+- **tasks/scripts**: Depends on [exceptions] - generates scripts, raises ConfigurationError
+
+### Cloud Layer (Phase 2)
+- **cloud/cost_estimator**: Depends on [tasks/resources, config, exceptions] - estimates based on resources and preferences
+- **cloud/error_translator**: Depends on [exceptions] - translates to VibeML exception types
+- **cloud/nebius**: Depends on [tasks/resources, config, exceptions] - uses resources, needs credentials
+- **cloud/skypilot_wrapper**: Depends on [exceptions, cloud/error_translator] - wraps SkyPilot, translates errors
+
+### Task Generation Layer (Phase 3)
+- **tasks/unsloth**: Depends on [tasks/validation, tasks/resources, tasks/scripts, exceptions] - combines validation, resources, scripts
+
+### Workflow Layer (Phase 4)
+- **workflows/metadata**: Depends on [exceptions] - provides metadata, raises errors
+- **workflows/registry**: Depends on [workflows/metadata, exceptions] - stores workflow functions
+- **workflows/selector**: Depends on [workflows/registry, workflows/metadata, tasks/resources] - selects based on metadata and resources
+
+### Job Management Layer (Phase 5)
+- **jobs/launcher**: Depends on [cloud/skypilot_wrapper, cloud/cost_estimator, config, exceptions] - launches via SkyPilot, checks cost and budget
+- **jobs/tracker**: Depends on [cloud/skypilot_wrapper, exceptions] - tracks via SkyPilot
+- **jobs/terminator**: Depends on [cloud/skypilot_wrapper, exceptions] - terminates via SkyPilot
+- **jobs/logs**: Depends on [cloud/skypilot_wrapper, exceptions] - retrieves logs via SkyPilot
+
+### Presentation Layer (Phase 6)
+- **server/validators**: Depends on [tasks/validation, exceptions] - validates using task validation logic
+- **server/formatters**: Depends on [exceptions] - formats errors and responses
+- **server/mcp_server**: Depends on [server/validators, server/formatters, jobs/launcher, jobs/tracker, jobs/terminator, jobs/logs, workflows/selector, tasks/unsloth, config] - orchestrates all capabilities
+
+</dependency-graph>
+
+---
+
+<implementation-roadmap>
+
+## Development Phases
+
+### Phase 0: Foundation
+**Goal**: Establish base infrastructure for error handling and configuration
+
+**Entry Criteria**: Clean repository with project structure initialized
+
+**Tasks**:
+- [ ] Implement exception hierarchy (depends on: none)
+  - Acceptance criteria: All VibeML exception classes defined, documented, inheriting properly
+  - Test strategy: Unit tests for exception creation, inheritance chain validation
+
+- [ ] Create configuration module (depends on: none)
+  - Acceptance criteria: Credentials encrypted and stored, preferences persisted to disk, loaded on startup
+  - Test strategy: Test credential encryption/decryption, preference file I/O, default values
+
+**Exit Criteria**: Other modules can import exceptions and config without errors
+
+**Delivers**: Foundation for all other modules to build upon
+
+---
+
+### Phase 1: Data Validation & Resource Configuration
+**Goal**: Validate training parameters and configure cloud resources
+
+**Entry Criteria**: Phase 0 complete
+
+**Tasks**:
+- [ ] Implement parameter validation (depends on: [exceptions])
+  - Acceptance criteria: Validates model names (HuggingFace format), dataset names, hyperparameters (ranges), GPU memory requirements
+  - Test strategy: Test valid/invalid models, datasets, edge cases (empty strings, very large values)
+
+- [ ] Implement resource configuration (depends on: [exceptions])
+  - Acceptance criteria: Maps GPU types to cloud instances, sets regions, configures spot/on-demand, sets disk size
+  - Test strategy: Test various GPU types, cloud providers, spot vs on-demand, resource constraints
+
+- [ ] Implement script generation (depends on: [exceptions])
+  - Acceptance criteria: Generates valid Python training scripts with parameter substitution, includes imports and error handling
+  - Test strategy: Generate scripts for various models/datasets, validate Python syntax, test with mock training run
+
+**Exit Criteria**: Can validate any training request and generate resource configurations
+
+**Delivers**: Safe parameter handling preventing invalid cloud launches
+
+---
+
+### Phase 2: Cloud Integration
+**Goal**: Integrate with SkyPilot and cloud providers (Nebius)
+
+**Entry Criteria**: Phase 1 complete
+
+**Tasks**:
+- [ ] Implement cost estimator (depends on: [tasks/resources, config, exceptions])
+  - Acceptance criteria: Returns cost estimates with min/max/expected values, queries cloud pricing APIs, factors spot discounts
+  - Test strategy: Test cost calculations for various GPU types and durations, mock pricing API responses
+
+- [ ] Implement error translator (depends on: [exceptions])
+  - Acceptance criteria: Translates SkyPilot exceptions to VibeML exceptions, provides actionable error messages, suggests fixes
+  - Test strategy: Test translation of common SkyPilot errors, validate error messages are user-friendly
+
+- [ ] Implement Nebius configuration (depends on: [tasks/resources, config, exceptions])
+  - Acceptance criteria: Maps GPU types to Nebius instances, sets regions, loads credentials from config
+  - Test strategy: Test Nebius-specific instance types, region mapping, credential handling
+
+- [ ] Implement SkyPilot wrapper (depends on: [exceptions, cloud/error_translator])
+  - Acceptance criteria: Async wrapper around sky.launch(), proper error handling, returns cluster handle
+  - Test strategy: Mock SkyPilot launch, test async behavior, error translation, timeout handling
+
+**Exit Criteria**: Can launch real SkyPilot tasks on Nebius with cost estimation
+
+**Delivers**: Working cloud integration with cost transparency
+
+---
+
+### Phase 3: Task Generation
+**Goal**: Generate SkyPilot Task objects for training workflows
+
+**Entry Criteria**: Phase 2 complete
+
+**Tasks**:
+- [ ] Implement Unsloth task generator (depends on: [tasks/validation, tasks/resources, tasks/scripts, exceptions])
+  - Acceptance criteria: Creates valid SkyPilot Task with setup/run scripts, configures 4-bit quantization and LoRA, supports various model sizes
+  - Test strategy: Generate tasks for small/medium/large models, validate Task object structure, test script syntax
+
+**Exit Criteria**: Can generate complete SkyPilot Task for Unsloth fine-tuning
+
+**Delivers**: End-to-end task generation from parameters to executable Task
+
+---
+
+### Phase 4: Workflow Management
+**Goal**: Support multiple training workflows with selection logic
+
+**Entry Criteria**: Phase 3 complete
+
+**Tasks**:
+- [ ] Implement workflow metadata (depends on: [exceptions])
+  - Acceptance criteria: Stores workflow info (cost range, duration, GPU requirements, supported models)
+  - Test strategy: Test metadata storage and retrieval for multiple workflows
+
+- [ ] Implement workflow registry (depends on: [workflows/metadata, exceptions])
+  - Acceptance criteria: Registers workflow functions, validates function signatures, returns registered workflows
+  - Test strategy: Register multiple workflows, test retrieval, test error handling for invalid registrations
+
+- [ ] Implement workflow selector (depends on: [workflows/registry, workflows/metadata, tasks/resources])
+  - Acceptance criteria: Selects best workflow based on model size, budget, quality requirements
+  - Test strategy: Test selection logic for various constraints, edge cases (no workflow matches)
+
+**Exit Criteria**: Can select and retrieve appropriate workflow for any training request
+
+**Delivers**: Extensible workflow system ready for future additions (LoRA, full training)
+
+---
+
+### Phase 5: Job Management
+**Goal**: Orchestrate complete training job lifecycle
+
+**Entry Criteria**: Phase 4 complete
+
+**Tasks**:
+- [ ] Implement job launcher (depends on: [cloud/skypilot_wrapper, cloud/cost_estimator, config, exceptions])
+  - Acceptance criteria: Launches jobs via SkyPilot, checks budget before launch, returns job handle with tracking info
+  - Test strategy: Mock SkyPilot launch, test budget checking, test error handling for launch failures
+
+- [ ] Implement job tracker (depends on: [cloud/skypilot_wrapper, exceptions])
+  - Acceptance criteria: Queries job status from SkyPilot, parses training progress from logs, returns structured status
+  - Test strategy: Mock SkyPilot status queries, test status parsing, test handling of missing/failed jobs
+
+- [ ] Implement job terminator (depends on: [cloud/skypilot_wrapper, exceptions])
+  - Acceptance criteria: Stops training gracefully, optionally preserves checkpoints, tears down cluster
+  - Test strategy: Mock SkyPilot termination, test cleanup options, test error handling
+
+- [ ] Implement log retrieval (depends on: [cloud/skypilot_wrapper, exceptions])
+  - Acceptance criteria: Fetches logs from SkyPilot clusters, filters by type (stdout/stderr/metrics)
+  - Test strategy: Mock log fetching, test log parsing, test handling of large log files
+
+**Exit Criteria**: Complete job lifecycle management from launch to termination
+
+**Delivers**: Full control over training jobs with status tracking and logging
+
+---
+
+### Phase 6: MCP Server Interface
+**Goal**: Expose capabilities via MCP protocol for AI assistants
+
+**Entry Criteria**: Phase 5 complete
+
+**Tasks**:
+- [ ] Implement request validators (depends on: [server/validators, exceptions])
+  - Acceptance criteria: Validates all MCP request types using Pydantic, returns clear validation errors
+  - Test strategy: Test valid/invalid requests, edge cases, error message clarity
+
+- [ ] Implement response formatters (depends on: [exceptions])
+  - Acceptance criteria: Formats all operation results as MCP-compliant JSON, includes error details
+  - Test strategy: Test formatting of various result types, error responses, JSON schema compliance
+
+- [ ] Implement MCP server (depends on: [server/validators, server/formatters, jobs/launcher, jobs/tracker, jobs/terminator, jobs/logs, workflows/selector, tasks/unsloth, config])
+  - Acceptance criteria: FastMCP server exposes all tools (launch, status, logs, terminate), handles requests asynchronously, integrates all modules
+  - Test strategy: Integration tests with mock MCP client, test all tool endpoints, test error propagation
+
+**Exit Criteria**: MCP server responds to requests from AI assistants and executes complete workflows
+
+**Delivers**: Production-ready conversational interface for training jobs
+
+---
+
+### Phase 7: Integration & Polish
+**Goal**: End-to-end testing and user experience refinement
+
+**Entry Criteria**: Phase 6 complete
+
+**Tasks**:
+- [ ] End-to-end integration tests (depends on: [all previous modules])
+  - Acceptance criteria: Full workflow tests from MCP request to job completion, tests with real Nebius cloud (dev account)
+  - Test strategy: Test complete user journeys, test error scenarios, test concurrent requests
+
+- [ ] CLI tool implementation (depends on: [server/mcp_server])
+  - Acceptance criteria: `uv tool install vibeml` works, `vibeml start` launches MCP server, proper logging and diagnostics
+  - Test strategy: Test installation, server lifecycle, configuration management
+
+- [ ] Documentation (depends on: [all modules])
+  - Acceptance criteria: README with quickstart, API documentation, architecture diagrams, troubleshooting guide
+  - Test strategy: Follow documentation as new user, verify all examples work
+
+**Exit Criteria**: Complete, documented, tested system ready for MVP release
+
+**Delivers**: Production-ready VibeML MVP
+
+</implementation-roadmap>
+
+---
+
+<test-strategy>
+
+## Test Pyramid
+
+```
+        /\
+       /E2E\       ← 10% (End-to-end with real cloud)
+      /------\
+     /Integration\ ← 30% (Module interactions, mocked cloud)
+    /------------\
+   /  Unit Tests  \ ← 60% (Fast, isolated, deterministic)
+  /----------------\
+```
+
+## Coverage Requirements
+- Line coverage: 90% minimum
+- Branch coverage: 85% minimum
+- Function coverage: 95% minimum
+- Statement coverage: 90% minimum
+
+## Critical Test Scenarios
+
+### MCP Server Interface
+**Happy path**:
+- Valid launch request → successful job launch → returns job ID
+- Expected: 200 OK response with job handle
+
+**Edge cases**:
+- Request with optional parameters omitted → uses defaults
+- Expected: Successful launch with default values logged
+
+**Error cases**:
+- Invalid model name → validation error
+- Expected: 400 error with clear message "Model 'xyz' not found on HuggingFace"
+
+**Integration points**:
+- MCP request → validator → launcher → SkyPilot → Nebius
+- Expected: Full trace through all layers, proper error propagation
+
+### Task Generation
+**Happy path**:
+- create_unsloth_task("meta-llama/Llama-3.2-1B", "tatsu-lab/alpaca", "H100")
+- Expected: Valid SkyPilot Task with correct resources and scripts
+
+**Edge cases**:
+- Very large model (70B+) → increases GPU requirements automatically
+- Expected: Task configured with multi-GPU setup
+
+**Error cases**:
+- Invalid GPU type → ResourceError
+- Expected: Clear error "GPU type 'RTX9000' not supported. Available: H100, A100, L40S"
+
+**Integration points**:
+- Task generation → resource config → script generation
+- Expected: Complete Task object ready for launch
+
+### Job Management
+**Happy path**:
+- Launch job → track status → job completes → retrieve logs
+- Expected: Status transitions (pending → running → completed), logs available
+
+**Edge cases**:
+- Job exceeds estimated time → continues running
+- Expected: Status still updating, cost accumulates
+
+**Error cases**:
+- Spot instance preempted → automatic failover
+- Expected: Job relaunched on new instance, progress preserved
+
+**Integration points**:
+- Launch → SkyPilot → Nebius → status polling
+- Expected: Real-time status updates, accurate cost tracking
+
+### Cloud Integration
+**Happy path**:
+- SkyPilot task launch → cluster created → returns handle
+- Expected: Cluster accessible via handle, ready for commands
+
+**Edge cases**:
+- First launch in region → slower due to image download
+- Expected: Extended setup time logged, user notified
+
+**Error cases**:
+- No GPU capacity available → suggest alternative regions
+- Expected: Error with actionable suggestions "No H100 in eu-north1. Try: us-west1, us-east1"
+
+**Integration points**:
+- Task → SkyPilot → Nebius API → cluster
+- Expected: End-to-end cloud resource provisioning
+
+### Configuration Management
+**Happy path**:
+- Store credentials → retrieve credentials → authenticate with cloud
+- Expected: Credentials encrypted at rest, decrypted for use
+
+**Edge cases**:
+- Missing config file → create with defaults
+- Expected: Config file created in user directory, defaults applied
+
+**Error cases**:
+- Budget exceeded → prevent launch
+- Expected: Error "Estimated cost $50 exceeds budget $30. Approve override?"
+
+**Integration points**:
+- Config → credentials → cloud authentication
+- Expected: Secure credential flow to cloud providers
+
+## Test Generation Guidelines
+
+1. **Async Testing**: Use `pytest-asyncio` for all async functions, ensure proper event loop handling
+2. **Mocking Strategy**: Mock SkyPilot at the API boundary (`sky.launch`, `sky.status`), not internal functions
+3. **Fixture Organization**: Create fixtures for common objects (Task, Resources, JobHandle)
+4. **Error Testing**: Test both exception raising and error message content
+5. **Integration Tests**: Use real SkyPilot Task objects, mock only cloud API calls
+6. **TDD Workflow**: 
+   - RED: Write test that fails (feature doesn't exist)
+   - GREEN: Implement minimum code to pass test
+   - REFACTOR: Clean up implementation while keeping tests green
+   - COMMIT: Commit with descriptive message about what was implemented
+
+</test-strategy>
+
+---
+
+<architecture>
+
+## System Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     AI Assistant                             │
+│                 (Claude / ChatGPT)                           │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ MCP Protocol
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  VibeML MCP Server                           │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  Tool Handlers (launch, status, logs, terminate)       │ │
+│  └─────────────┬──────────────────────────────────────────┘ │
+│                │                                             │
+│  ┌─────────────▼──────────────────────────────────────────┐ │
+│  │  Workflow Selector → Task Generator → Job Manager      │ │
+│  └─────────────┬──────────────────────────────────────────┘ │
+└────────────────┼──────────────────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    SkyPilot Layer                            │
+│  - Multi-cloud abstraction                                   │
+│  - Spot instance management                                  │
+│  - Cost optimization                                         │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Cloud Providers                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │  Nebius  │  │   AWS    │  │   GCP    │  │  Azure   │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Data Models
+
+### TrainingRequest
+```python
+class TrainingRequest(BaseModel):
+    model: str  # HuggingFace model ID
+    dataset: str  # HuggingFace dataset ID
+    workflow: Optional[str] = "unsloth"  # Workflow type
+    gpu_type: Optional[str] = None  # GPU preference (None = auto-select)
+    cloud: Optional[str] = "nebius"  # Cloud provider
+    max_cost: Optional[float] = None  # Budget limit
+    hyperparameters: Optional[Dict[str, Any]] = None
+```
+
+### JobHandle
+```python
+class JobHandle(BaseModel):
+    job_id: str  # Unique job identifier
+    cluster_name: str  # SkyPilot cluster name
+    status: JobStatus  # Current job status
+    cost_estimate: CostEstimate
+    created_at: datetime
+    model: str
+    dataset: str
+```
+
+### JobStatus
+```python
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TERMINATED = "terminated"
+```
+
+### CostEstimate
+```python
+class CostEstimate(BaseModel):
+    hourly_rate: float  # USD per hour
+    estimated_duration_hours: float
+    min_cost: float  # Minimum expected cost
+    max_cost: float  # Maximum expected cost
+    expected_cost: float  # Best estimate
+    currency: str = "USD"
+```
+
+### WorkflowMetadata
+```python
+class WorkflowMetadata(BaseModel):
+    name: str
+    description: str
+    gpu_requirements: Dict[str, List[str]]  # model_size -> [gpu_types]
+    typical_duration_hours: float
+    cost_range_usd: Tuple[float, float]  # (min, max)
+    supported_model_sizes: List[str]  # ["7B", "13B", "70B"]
+```
+
+## Technology Stack
+
+### Core Dependencies
+- **Python 3.9+**: Async/await support, type hints
+- **FastMCP**: MCP server implementation
+- **SkyPilot**: Multi-cloud orchestration
+- **Pydantic**: Data validation and settings management
+- **Click**: CLI framework
+- **UV**: Package management and tool distribution
+
+**Decision: FastMCP over custom MCP implementation**
+- **Rationale**: Faster development, proven MCP protocol compliance, built-in async support
+- **Trade-offs**: Less control over protocol internals, dependency on third-party library
+- **Alternatives considered**: Build custom MCP server (rejected: too much overhead)
+
+**Decision: Direct SkyPilot Task objects vs YAML templates**
+- **Rationale**: Type safety, easier testing, no template rendering overhead
+- **Trade-offs**: Less human-readable than YAML, harder for non-Python users to extend
+- **Alternatives considered**: Jinja2 templates (rejected: unnecessary complexity)
+
+**Decision: Nebius as primary cloud provider for MVP**
+- **Rationale**: Competitive GPU pricing, good H100 availability, SkyPilot support
+- **Trade-offs**: Less mature than AWS/GCP, fewer regions
+- **Alternatives considered**: AWS (rejected: more expensive), RunPod (rejected: less SkyPilot integration)
+
+**Decision: Spot instances by default**
+- **Rationale**: 50-70% cost savings, SkyPilot handles preemptions automatically
+- **Trade-offs**: Potential interruptions, slightly more complex error handling
+- **Alternatives considered**: On-demand only (rejected: too expensive for target users)
+
+</architecture>
+
+---
+
+<risks>
+
+## Technical Risks
+
+**Risk**: SkyPilot API changes break integration
+- **Impact**: High - core functionality depends on SkyPilot
+- **Likelihood**: Medium - SkyPilot is under active development
+- **Mitigation**: Pin SkyPilot version in MVP, monitor release notes, add version compatibility tests
+- **Fallback**: Fork SkyPilot if breaking changes introduced, maintain compatibility layer
+
+**Risk**: Async wrapper doesn't properly handle SkyPilot blocking operations
+- **Impact**: High - blocks MCP server, poor user experience
+- **Likelihood**: Medium - SkyPilot has long-running synchronous operations
+- **Mitigation**: Use FastMCP's `make_async_background` decorator, test with real cloud operations
+- **Fallback**: Implement thread pool executor for blocking calls
+
+**Risk**: Cost estimation inaccurate due to pricing API changes
+- **Impact**: Medium - users may be surprised by costs
+- **Likelihood**: Medium - cloud pricing changes frequently
+- **Mitigation**: Add buffer to estimates (20%), show min/max ranges, require confirmation for large jobs
+- **Fallback**: Manual cost entry, pricing database fallback
+
+**Risk**: Error messages too technical for target users
+- **Impact**: Medium - poor user experience, support burden
+- **Likelihood**: High - SkyPilot errors are technical
+- **Mitigation**: Comprehensive error translation layer, user testing of error messages
+- **Fallback**: Link to documentation for each error type
+
+## Dependency Risks
+
+**Risk**: Nebius GPU capacity insufficient for user demand
+- **Impact**: High - jobs can't launch, users blocked
+- **Likelihood**: Medium - H100 availability varies
+- **Mitigation**: Multi-region fallback, alternative GPU type suggestions, waitlist with notifications
+- **Fallback**: Implement AWS/GCP as secondary providers in Phase 2
+
+**Risk**: SkyPilot-Nebius integration has bugs
+- **Impact**: High - core functionality broken
+- **Likelihood**: Low - SkyPilot supports Nebius officially
+- **Mitigation**: Test thoroughly with real Nebius launches, report bugs upstream
+- **Fallback**: Direct Nebius API integration bypassing SkyPilot (high effort)
+
+**Risk**: HuggingFace Hub rate limits affect model downloads
+- **Impact**: Medium - training jobs fail during setup
+- **Likelihood**: Low - generous rate limits for registered users
+- **Mitigation**: Use HuggingFace API tokens, implement exponential backoff
+- **Fallback**: Pre-download popular models to cloud storage
+
+## Scope Risks
+
+**Risk**: Feature creep - adding multi-cloud support during MVP
+- **Impact**: Medium - delays MVP launch
+- **Likelihood**: High - users will request AWS/GCP
+- **Mitigation**: Strict MVP scope definition, promise multi-cloud in Phase 2
+- **Fallback**: Plugin architecture allows third-party cloud providers
+
+**Risk**: Underestimating effort for error handling
+- **Impact**: Medium - more time needed than planned
+- **Likelihood**: High - cloud errors are diverse and unpredictable
+- **Mitigation**: Allocate 30% buffer for error handling, implement incrementally
+- **Fallback**: Ship MVP with basic error handling, enhance in patches
+
+**Risk**: Training workflow complexity exceeds simple task generation
+- **Impact**: Medium - need more sophisticated script generation
+- **Likelihood**: Medium - users want custom training scripts
+- **Mitigation**: Support custom script uploads, provide template library
+- **Fallback**: Focus on Unsloth only for MVP, expand in Phase 2
+
+</risks>
+
+---
+
+<appendix>
+
+## References
+
+- **SkyPilot Documentation**: https://skypilot.readthedocs.io/
+- **FastMCP Documentation**: https://github.com/jlowin/fastmcp
+- **Model Context Protocol Specification**: https://modelcontextprotocol.io/
+- **Unsloth Fine-tuning Guide**: https://github.com/unslothai/unsloth
+- **Nebius Cloud Documentation**: https://nebius.ai/docs/
+
+## Glossary
+
+- **MCP (Model Context Protocol)**: Standardized protocol for AI assistants to interact with external tools
+- **SkyPilot**: Open-source framework for running workloads across any cloud
+- **Spot Instance**: Spare cloud compute capacity sold at steep discounts (but can be interrupted)
+- **LoRA (Low-Rank Adaptation)**: Parameter-efficient fine-tuning method
+- **Unsloth**: Library for efficient 4-bit quantized LoRA fine-tuning
+- **Task (SkyPilot)**: Unit of work defining setup, run scripts, and resource requirements
+- **Cluster (SkyPilot)**: Cloud VM(s) provisioned to run a task
+- **HuggingFace Hub**: Repository of pre-trained models and datasets
+- **FastMCP**: Python library for building MCP servers quickly
+- **UV**: Modern Python package manager and tool installer
+
+## Open Questions
+
+1. **Cost Alert Mechanism**: Should we proactively alert users during long-running jobs that exceed estimates? How?
+2. **Checkpoint Strategy**: How should we handle checkpointing for jobs that fail or are preempted? Auto-resume?
+3. **Multi-Model Training**: Should MVP support training multiple models in parallel from single request?
+4. **Output Storage**: Where should fine-tuned models be saved? HuggingFace Hub auto-push? S3? User's choice?
+5. **Monitoring Integration**: Should we integrate with W&B/TensorBoard from the start or defer to Phase 3?
+6. **Team Features**: At what point do we add multi-user support (authentication, cost attribution)?
+7. **Dataset Validation**: Should we validate dataset format compatibility with model before launching?
+8. **GPU Optimization**: Should we auto-select optimal GPU based on model size or always ask user?
+
+</appendix>
+

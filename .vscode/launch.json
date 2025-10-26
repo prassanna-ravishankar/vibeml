@@ -1,0 +1,59 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug SkyPilot Check",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug_skypilot.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
+      },
+      "justMyCode": false,
+      "stopOnEntry": false
+    },
+    {
+      "name": "Debug SkyPilot Import",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug_imports.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
+      },
+      "justMyCode": false,
+      "stopOnEntry": false
+    },
+    {
+      "name": "Run Sky Check with Debug",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "sky.cli",
+      "args": ["check", "-v", "runpod"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "justMyCode": false,
+      "stopOnEntry": false
+    },
+    {
+      "name": "Test RunPod Import Directly",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/test_runpod_import.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
+      },
+      "justMyCode": false,
+      "stopOnEntry": false
+    }
+  ]
+}

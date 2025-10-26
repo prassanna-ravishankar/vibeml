@@ -1,0 +1,125 @@
+{
+	"meta": {
+		"generatedAt": "2025-10-26T20:44:14.713Z",
+		"tasksAnalyzed": 14,
+		"totalTasks": 14,
+		"analysisCount": 14,
+		"thresholdScore": 5,
+		"projectName": "Taskmaster",
+		"usedResearch": true
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 1,
+			"taskTitle": "Implement Data Model Classes and Validation Layer",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Break down creating Pydantic v2 models in `src/vibeml/models.py`, wiring them into `src/vibeml/server.py`, and adding validation/unit tests into clear implementation and testing steps.",
+			"reasoning": "Current request/response handling in `src/vibeml/server.py:1` uses loose dicts with minimal checks, so introducing multiple Pydantic models plus richer validation (model format, dataset existence, GPU types, cost limits) and refactoring async tool handlers represents a moderate refactor with new dependencies and comprehensive tests."
+		},
+		{
+			"taskId": 2,
+			"taskTitle": "Expand Exception Hierarchy with Custom Error Types",
+			"complexityScore": 7,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Outline steps to extend `src/vibeml/exceptions.py`, add recovery utilities, integrate translation layers across SkyPilot interactions, and cover the behavior with tests.",
+			"reasoning": "`src/vibeml/exceptions.py:1` currently exposes only a handful of simple exception classes, so introducing multiple specialized errors, recovery strategies (retry/backoff, fallbacks), and a translation layer that threads through SkyPilot touchpoints in `src/vibeml/server.py` and future modules requires coordinated updates and new supporting code."
+		},
+		{
+			"taskId": 3,
+			"taskTitle": "Implement Configuration Management System",
+			"complexityScore": 8,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "Detail subtasks for building the `src/vibeml/config/` package (credentials, preferences, budget), implementing encryption/versioning/migrations, wiring environment fallbacks, and validating with tests.",
+			"reasoning": "No configuration infrastructure exists today; adding encrypted credential storage, preference handling, budget enforcement, versioned file I/O, and validation (likely touching CLI and server flows) demands several new modules plus integration and extensive testing."
+		},
+		{
+			"taskId": 4,
+			"taskTitle": "Implement Advanced Parameter Validation and Resource Configuration",
+			"complexityScore": 8,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Plan subtasks to create `src/vibeml/tasks/validation.py` and `src/vibeml/tasks/resources.py`, integrate HuggingFace and dataset checks, GPU memory math, and connect the logic back into workflow creation with tests.",
+			"reasoning": "`src/vibeml/tasks.py:1` performs only basic string checks and static GPU tables, so adding external HuggingFace lookups, dataset access validation, GPU requirement calculations, and resource optimization modules introduces non-trivial new dependencies and logic that must feed back into task generation."
+		},
+		{
+			"taskId": 5,
+			"taskTitle": "Implement Advanced Script Generation and Template System",
+			"complexityScore": 8,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Lay out work to build `src/vibeml/tasks/scripts.py` with Jinja2 templates, implement error-handling/checkpoint/monitoring logic in generated scripts, integrate with workflows, and verify with tests.",
+			"reasoning": "There is no templating or script-generation layer today; delivering a flexible Jinja2-driven system with conditional logic, error recovery, checkpointing, and monitoring hooks plus tests represents significant greenfield development tied to workflow inputs."
+		},
+		{
+			"taskId": 6,
+			"taskTitle": "Implement Cloud Integration Layer with Cost Estimation",
+			"complexityScore": 9,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "Decompose creating the `src/vibeml/cloud/` package (SkyPilot async wrapper, Nebius cost estimator, provider config, error translator), adding retries/timeouts, and validating the integrations.",
+			"reasoning": "SkyPilot calls in `src/vibeml/server.py:33` are synchronous and thin; replacing them with async wrappers, real-time Nebius pricing, provider-specific configuration, and robust retry/error translation spans multiple complex modules and external API interactions."
+		},
+		{
+			"taskId": 7,
+			"taskTitle": "Implement Enhanced Task Generation with Multiple Workflows",
+			"complexityScore": 8,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Draft subtasks to refactor `src/vibeml/tasks.py` for additional workflows, integrate parameter validation/resources/scripts modules, implement optimization logic, and extend tests.",
+			"reasoning": "Expanding the limited workflows in `src/vibeml/tasks.py:1` to cover DeepSpeed/FSDP, custom scripts, distributed setups, and resource optimization requires major restructuring plus coordination with new validation and script subsystems."
+		},
+		{
+			"taskId": 8,
+			"taskTitle": "Implement Workflow Registry and Selection System",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Plan creation of the `src/vibeml/workflows/` package (registry, metadata, selector), implement scoring/recommendation logic, expose integration points, and cover with tests.",
+			"reasoning": "With only a simple dict in `src/vibeml/tasks.py:301`, introducing a metadata-rich registry, selector algorithms, decision explanations, and plugin hooks adds substantial new logic, though it builds on other in-flight modules."
+		},
+		{
+			"taskId": 9,
+			"taskTitle": "Implement Comprehensive Job Management System",
+			"complexityScore": 9,
+			"recommendedSubtasks": 8,
+			"expansionPrompt": "Break down building the `src/vibeml/jobs/` package (launcher, tracker, terminator, logs), implementing the job state machine, failover/budget tracking, monitoring hooks, and comprehensive tests.",
+			"reasoning": "Currently job lifecycle tracking is just an in-memory dict in `src/vibeml/server.py:24`; delivering full launch/track/terminate modules with state machines, queueing, failover, metadata, and monitoring integrations is a large multi-component effort with complex behavior and test needs."
+		},
+		{
+			"taskId": 10,
+			"taskTitle": "Implement Enhanced MCP Server with Request/Response Handling",
+			"complexityScore": 9,
+			"recommendedSubtasks": 8,
+			"expansionPrompt": "Outline steps to refactor the server into `src/vibeml/server/` (validators, formatters, MCP server), wire in authentication/rate limiting/caching, expand tool coverage, and implement tests.",
+			"reasoning": "The monolithic FastMCP setup in `src/vibeml/server.py:1` lacks validation, formatting, middleware, or advanced tooling; restructuring into a package with async handlers, comprehensive tools, and cross-cutting concerns like caching and auth will be a substantial architectural overhaul dependent on several other modules."
+		},
+		{
+			"taskId": 11,
+			"taskTitle": "Implement Advanced Error Handling and Recovery System",
+			"complexityScore": 8,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Detail subtasks to extend `src/vibeml/exceptions.py` with classification/recovery, hook the logic into job and cloud modules, add reporting/analytics, and validate with tests.",
+			"reasoning": "Building on the expanded hierarchy from Task 2, layering classification, automated recovery (e.g., spot preemption relaunch), context preservation, and reporting dashboards requires updates across exceptions, job management, and cloud integration components."
+		},
+		{
+			"taskId": 12,
+			"taskTitle": "Implement Comprehensive Integration Testing Framework",
+			"complexityScore": 9,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "Plan work to set up end-to-end integration tests under `tests/`, including fixtures, mocks vs. real Nebius runs, coverage/performance tooling, CI wiring, and stress scenarios.",
+			"reasoning": "The current test suite (`tests/test_tasks.py:1`) only covers unit-level workflow generation; standing up end-to-end, cloud-interacting, performance, and fault-injection tests plus CI integration represents a major testing infrastructure build."
+		},
+		{
+			"taskId": 13,
+			"taskTitle": "Implement CLI Enhancement and Documentation System",
+			"complexityScore": 7,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Break down enhancing `src/vibeml/__main__.py` with new command groups, interactive setup, documentation generation, shell completion, and accompanying tests/docs updates.",
+			"reasoning": "The CLI now exposes only `server` and `info` commands (`src/vibeml/__main__.py:1`); adding configuration wizards, job/workflow management commands, generated documentation, and completion support requires sizable CLI restructuring and doc tooling."
+		},
+		{
+			"taskId": 14,
+			"taskTitle": "Implement Production Deployment and Monitoring Features",
+			"complexityScore": 9,
+			"recommendedSubtasks": 8,
+			"expansionPrompt": "Draft subtasks for adding structured logging/metrics/health checks, building monitoring dashboards, creating deployment artifacts (Docker/Kubernetes/scripts), implementing security controls, and validating them.",
+			"reasoning": "There is no production infrastructure in place—logging is basic prints, no metrics or deployment tooling—so delivering end-to-end observability, security, and deployment automation across the project will require extensive new modules, configuration, and operational testing."
+		}
+	]
+}

@@ -1,0 +1,200 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Implement Data Model Classes and Validation Layer",
+        "description": "Create Pydantic models for TrainingRequest, JobHandle, JobStatus, CostEstimate, and WorkflowMetadata to provide type-safe data structures and request validation throughout the system.",
+        "details": "Create src/vibeml/models.py with Pydantic v2 models: TrainingRequest (model, dataset, workflow, gpu_type, cloud, max_cost, hyperparameters), JobHandle (job_id, cluster_name, status, cost_estimate, created_at, model, dataset), JobStatus enum (PENDING, RUNNING, COMPLETED, FAILED, TERMINATED), CostEstimate (hourly_rate, estimated_duration_hours, min_cost, max_cost, expected_cost, currency), WorkflowMetadata (name, description, gpu_requirements, typical_duration_hours, cost_range_usd, supported_model_sizes). Update existing server.py to use these models for request validation and response formatting. Add comprehensive field validation (model format checking, dataset existence, GPU type validation, cost limits).",
+        "testStrategy": "Unit tests for each model with valid/invalid data, field validation tests, edge cases (empty strings, negative numbers, invalid enum values), serialization/deserialization tests.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Expand Exception Hierarchy with Custom Error Types",
+        "description": "Extend the existing exception hierarchy to add missing exception types and implement error recovery strategies and translation mechanisms for better user experience.",
+        "details": "Add to src/vibeml/exceptions.py: ConfigurationError (invalid config settings), BudgetExceededError (cost limits), CloudProviderError (cloud-specific failures), ModelNotFoundError (invalid model IDs), DatasetError (dataset access issues). Implement error recovery strategies: retry with exponential backoff for transient failures, fallback suggestions for capacity issues, automatic region switching for unavailable resources. Create error translation layer that converts technical SkyPilot/cloud errors into user-friendly messages with actionable guidance. Add error context preservation to maintain debugging information while showing clean user messages.",
+        "testStrategy": "Test exception creation and inheritance, error message formatting, recovery strategy triggers, error translation accuracy, context preservation in error chains.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Implement Configuration Management System",
+        "description": "Create a comprehensive configuration management system for credentials, user preferences, budget controls, and secure storage with encryption for sensitive data.",
+        "details": "Create src/vibeml/config/ module with: credentials.py (encrypted storage using cryptography library, credential retrieval, cloud provider credential validation), preferences.py (user defaults for GPU types, regions, budget limits, workflow preferences stored in ~/.vibeml/config.json), budget.py (budget enforcement, spending tracking, cost alerts, approval workflows for exceeding limits). Implement secure credential storage using Fernet encryption, environment variable fallbacks, credential validation against cloud provider APIs. Add configuration file versioning and migration support. Include configuration validation and schema checking.",
+        "testStrategy": "Test credential encryption/decryption, config file I/O, default value handling, budget enforcement logic, credential validation, migration between config versions.",
+        "priority": "high",
+        "dependencies": [
+          2
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Implement Advanced Parameter Validation and Resource Configuration",
+        "description": "Create robust parameter validation that checks model existence on HuggingFace, dataset accessibility, GPU memory requirements, and resource constraint validation.",
+        "details": "Create src/vibeml/tasks/validation.py with HuggingFace Hub integration using huggingface_hub library to validate model existence and access permissions. Implement dataset validation including format checking and access verification. Add GPU memory requirement calculation based on model size and batch size. Create resource constraint validation ensuring GPU type matches model requirements. Implement src/vibeml/tasks/resources.py for advanced resource configuration: automatic GPU selection based on model size, multi-region fallback configuration, spot instance vs on-demand decision logic, disk size optimization based on model and dataset size. Add cost optimization suggestions and resource utilization monitoring.",
+        "testStrategy": "Test model validation with valid/invalid HuggingFace models, dataset access verification, GPU memory calculations for various model sizes, resource optimization logic, fallback region selection.",
+        "priority": "medium",
+        "dependencies": [
+          1,
+          2
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "Implement Advanced Script Generation and Template System",
+        "description": "Create a sophisticated script generation system that produces optimized training scripts with error handling, checkpointing, and monitoring capabilities.",
+        "details": "Create src/vibeml/tasks/scripts.py with Jinja2 template engine for generating Python training scripts. Implement template system for different workflows with parameter substitution, conditional logic for different model sizes/types, optimized hyperparameter selection based on model and GPU type. Add comprehensive error handling in generated scripts: CUDA out of memory recovery, checkpoint resumption, dataset loading error handling, model loading failures. Implement automatic checkpointing strategy with configurable intervals, checkpoint validation, and resumption logic. Add training progress monitoring with loss tracking, time estimation, and resource utilization reporting. Include integration with Weights & Biases for experiment tracking (optional).",
+        "testStrategy": "Test script generation for various model/dataset combinations, validate Python syntax of generated scripts, test error handling scenarios, checkpoint save/load functionality, progress monitoring accuracy.",
+        "priority": "medium",
+        "dependencies": [
+          1,
+          4
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "Implement Cloud Integration Layer with Cost Estimation",
+        "description": "Create a comprehensive cloud integration layer that wraps SkyPilot operations with async support, cost estimation, and Nebius-specific optimizations.",
+        "details": "Create src/vibeml/cloud/ module with: skypilot_wrapper.py (async wrappers around sky.launch(), sky.status(), sky.down() using asyncio.run_in_executor, proper timeout handling, error propagation), cost_estimator.py (real-time pricing API integration for Nebius, cost calculation with spot discounts, duration estimation based on model size and dataset, cost alerts and budget checking), nebius.py (Nebius-specific configuration, region optimization, instance type mapping, authentication handling), error_translator.py (translate SkyPilot exceptions to user-friendly messages, suggest alternatives for common failures, provide actionable guidance). Implement automatic retry logic for transient failures, spot instance preemption handling, and capacity issue fallbacks.",
+        "testStrategy": "Test async SkyPilot operations, cost estimation accuracy, Nebius configuration mapping, error translation quality, retry mechanisms, timeout handling.",
+        "priority": "high",
+        "dependencies": [
+          2,
+          3
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "Implement Enhanced Task Generation with Multiple Workflows",
+        "description": "Enhance the existing task generation system to support additional workflows, better parameter handling, and optimized resource allocation.",
+        "details": "Enhance src/vibeml/tasks.py to support additional workflows: standard LoRA fine-tuning (without Unsloth), full parameter fine-tuning with DeepSpeed/FSDP, custom script workflows, distributed training setups. Implement intelligent resource allocation: automatic GPU count calculation based on model size, memory-optimized configurations, network bandwidth requirements for multi-node setups. Add workflow-specific optimizations: quantization settings for different GPU types, batch size optimization, gradient accumulation strategies, learning rate scheduling. Integrate with the validation and script generation systems for comprehensive task creation. Add support for custom Docker images and environment configurations.",
+        "testStrategy": "Test task generation for all supported workflows, validate resource allocation logic, test script integration, verify GPU optimization for different model sizes, test distributed training configurations.",
+        "priority": "medium",
+        "dependencies": [
+          4,
+          5
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Implement Workflow Registry and Selection System",
+        "description": "Create a sophisticated workflow management system that can recommend optimal workflows based on user requirements and constraints.",
+        "details": "Create src/vibeml/workflows/ module with: registry.py (workflow registration with metadata, capability tracking, compatibility matrices), selector.py (intelligent workflow selection based on model size, budget constraints, quality requirements, time constraints using scoring algorithms), metadata.py (comprehensive workflow metadata including cost ranges, typical durations, GPU requirements, quality trade-offs). Implement workflow recommendation engine that considers: model size vs GPU memory, budget vs quality trade-offs, time constraints vs training thoroughness, user experience level. Add workflow comparison features and decision explanation. Support for custom workflow plugins and third-party integrations.",
+        "testStrategy": "Test workflow registration, selection algorithm accuracy, metadata completeness, recommendation quality for various constraints, plugin system functionality.",
+        "priority": "medium",
+        "dependencies": [
+          1,
+          7
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Implement Comprehensive Job Management System",
+        "description": "Create a complete job lifecycle management system with advanced tracking, monitoring, and control capabilities.",
+        "details": "Create src/vibeml/jobs/ module with: launcher.py (job launching with pre-flight checks, budget validation, resource verification), tracker.py (real-time status monitoring, progress tracking from logs, resource utilization monitoring), terminator.py (graceful job termination, checkpoint preservation, cleanup management), logs.py (log streaming, parsing, filtering, structured log extraction). Implement job state machine with proper transitions, job queuing for resource constraints, automatic failover for spot instance preemptions. Add job metadata tracking, cost accumulation, progress estimation, and completion notifications. Include integration with monitoring services and alerting systems.",
+        "testStrategy": "Test complete job lifecycle, state transitions, monitoring accuracy, log parsing, failover mechanisms, cost tracking precision, notification delivery.",
+        "priority": "high",
+        "dependencies": [
+          6,
+          8
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "Implement Enhanced MCP Server with Request/Response Handling",
+        "description": "Enhance the existing FastMCP server implementation with proper request validation, response formatting, and comprehensive tool coverage.",
+        "details": "Create src/vibeml/server/ module with: validators.py (Pydantic-based request validation, parameter type checking, constraint validation), formatters.py (MCP-compliant response formatting, error serialization, structured data output), mcp_server.py (enhanced FastMCP server with all tools, async request handling, proper error propagation). Implement comprehensive tool coverage: enhanced launch_training with full parameter support, detailed get_training_status with progress metrics, advanced stop_training with cleanup options, cost estimation with real-time pricing, workflow recommendation, job management tools. Add request middleware for authentication, rate limiting, and logging. Implement response caching for expensive operations.",
+        "testStrategy": "Test all MCP tools with various input combinations, request validation accuracy, response format compliance, error handling quality, async operation reliability, middleware functionality.",
+        "priority": "high",
+        "dependencies": [
+          1,
+          9
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "Implement Advanced Error Handling and Recovery System",
+        "description": "Create a comprehensive error handling system with automatic recovery, user guidance, and detailed error reporting.",
+        "details": "Enhance src/vibeml/exceptions.py with: error classification system (transient, permanent, user-actionable), automatic recovery strategies (retry with backoff, fallback options, alternative suggestions), error context preservation and reporting. Implement error recovery patterns: spot instance preemption handling with automatic relaunch, quota exceeded handling with region suggestions, model loading failures with alternative model recommendations, dataset access issues with format conversion suggestions. Add error reporting dashboard, error pattern analysis, and proactive issue prevention. Include integration with logging and monitoring systems for error tracking and analysis.",
+        "testStrategy": "Test error classification accuracy, recovery strategy effectiveness, error reporting completeness, recovery success rates, user guidance quality, error pattern detection.",
+        "priority": "medium",
+        "dependencies": [
+          2,
+          9
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "Implement Comprehensive Integration Testing Framework",
+        "description": "Create extensive integration tests that cover end-to-end workflows, real cloud operations, and system reliability testing.",
+        "details": "Create comprehensive test suite in tests/ with: integration tests for complete workflow execution from MCP request to job completion, cloud integration tests with real Nebius launches (using test/dev accounts), error scenario testing with fault injection, performance testing for concurrent operations, load testing for multiple simultaneous jobs. Implement test fixtures for common scenarios, mock services for expensive operations, test data management for reproducible testing. Add continuous integration setup with automated testing, test coverage reporting, and performance benchmarking. Include stress testing for resource limits and failure scenarios.",
+        "testStrategy": "Comprehensive end-to-end testing covering all user journeys, real cloud operations validation, error scenario coverage, performance benchmarks, stress testing results.",
+        "priority": "medium",
+        "dependencies": [
+          10,
+          11
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 13,
+        "title": "Implement CLI Enhancement and Documentation System",
+        "description": "Enhance the existing CLI with additional commands, configuration management, and comprehensive documentation generation.",
+        "details": "Enhance src/vibeml/__main__.py with additional CLI commands: config management (credential setup, preference configuration), job management (list, status, stop), workflow operations (list, describe, estimate-cost), debugging utilities (validate-config, test-connection). Implement interactive configuration wizard for first-time setup, credential validation, and cloud provider authentication. Add comprehensive help system with examples, troubleshooting guides, and best practices. Create auto-generated documentation from code docstrings, configuration schemas, and usage examples. Include man page generation and shell completion support.",
+        "testStrategy": "Test all CLI commands, interactive wizard functionality, help system accuracy, documentation generation, shell completion, cross-platform compatibility.",
+        "priority": "low",
+        "dependencies": [
+          3,
+          10
+        ],
+        "status": "pending",
+        "subtasks": []
+      },
+      {
+        "id": 14,
+        "title": "Implement Production Deployment and Monitoring Features",
+        "description": "Add production-ready features including monitoring, logging, metrics collection, and deployment utilities for the VibeML system.",
+        "details": "Implement production features: structured logging with configurable levels, metrics collection using Prometheus-style metrics, health check endpoints, graceful shutdown handling, configuration validation on startup. Add monitoring dashboard for job statistics, cost tracking, system health, error rates. Implement deployment utilities: Docker containerization, Kubernetes manifests, cloud deployment scripts, configuration management for different environments. Add security features: API key management, request authentication, rate limiting, audit logging. Include backup and recovery procedures for job data and configurations.",
+        "testStrategy": "Test monitoring accuracy, logging completeness, metrics collection, deployment scripts, security features, backup/recovery procedures, production load handling.",
+        "priority": "low",
+        "dependencies": [
+          12,
+          13
+        ],
+        "status": "pending",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-10-26T20:40:28.632Z",
+      "updated": "2025-10-26T20:51:18.009Z",
+      "description": "Tasks for master context"
+    }
+  }
+}
