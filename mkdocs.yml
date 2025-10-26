@@ -1,0 +1,161 @@
+site_name: VibeML
+site_description: Conversational AI model training on multi-cloud GPU resources
+site_author: Prass, The Nomadic Coder
+site_url: https://vibeml.readthedocs.io
+repo_url: https://github.com/prassanna-ravishankar/vibeml
+repo_name: prassanna-ravishankar/vibeml
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.tracking
+    - navigation.instant
+    - navigation.instant.progress
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - section-index
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_root_heading: true
+            show_source: true
+            show_bases: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            members_order: source
+            inherited_members: false
+            filters:
+              - "!^_"
+            heading_level: 2
+
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # Python Markdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+nav:
+  - Home: index.md
+  - Get Started:
+    - get-started/index.md
+    - Installation: get-started/installation.md
+    - Quick Start: get-started/quickstart.md
+    - Configuration: get-started/configuration.md
+  - Concepts:
+    - concepts/index.md
+    - Architecture: concepts/architecture.md
+    - Data Models: concepts/models.md
+    - Workflows: concepts/workflows.md
+    - Cost Management: concepts/cost-management.md
+  - How-to Guides:
+    - how-to/index.md
+    - Launch Training Jobs: how-to/launch-jobs.md
+    - Track Budgets: how-to/track-budgets.md
+    - Manage Credentials: how-to/manage-credentials.md
+    - Debug Cloud Issues: how-to/debug-cloud.md
+    - Use MCP Server: how-to/use-mcp.md
+  - Reference:
+    - reference/index.md
+    - CLI Commands: reference/cli.md
+    - API Reference:
+      - Data Models: reference/api/models.md
+      - Cloud Integration: reference/api/cloud.md
+      - Configuration: reference/api/config.md
+      - Validation: reference/api/validation.md
+      - Scripts: reference/api/scripts.md
+      - Exceptions: reference/api/exceptions.md
+    - MCP Server: reference/mcp.md
+  - Internals:
+    - internals/index.md
+    - Development: internals/development.md
+    - Testing: internals/testing.md
+    - Deployment: internals/deployment.md
+  - Playbooks:
+    - playbooks/index.md
+    - Troubleshooting: playbooks/troubleshooting.md
+    - Common Errors: playbooks/common-errors.md
+  - Contributing: contributing.md
+  - Code of Conduct: codeofconduct.md
+  - License: license.md
+  - Changelog: https://github.com/prassanna-ravishankar/vibeml/releases
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/prassanna-ravishankar/vibeml
+  version:
+    provider: mike

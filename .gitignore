@@ -6,8 +6,10 @@
 /.pytype/
 /dist/
 /docs/_build/
+/site/
 /src/*.egg-info/
 __pycache__/
+.venv/
 
 # Logs
 logs

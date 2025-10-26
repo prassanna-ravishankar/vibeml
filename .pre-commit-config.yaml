@@ -47,3 +47,17 @@ repos:
     rev: v2.6.0
     hooks:
       - id: prettier
+  - repo: local
+    hooks:
+      - id: mkdocs-build
+        name: Build MkDocs documentation
+        entry: mkdocs build --strict
+        language: system
+        files: ^(docs/.*|mkdocs\.yml)$
+        pass_filenames: false
+      - id: markdown-link-check
+        name: Check markdown links
+        entry: bash -c 'if command -v markdown-link-check &> /dev/null; then find docs -name "*.md" -exec markdown-link-check {} \;; else echo "markdown-link-check not installed, skipping"; fi'
+        language: system
+        files: \.md$
+        pass_filenames: false

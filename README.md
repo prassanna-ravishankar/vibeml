@@ -1,4 +1,6 @@
-# vibeml
+# VibeML
+
+**Conversational AI model training on multi-cloud GPU resources**
 
 [![PyPI](https://img.shields.io/pypi/v/vibeml.svg)][pypi status]
 [![Status](https://img.shields.io/pypi/status/vibeml.svg)][pypi status]
@@ -20,13 +22,42 @@
 [ruff badge]: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
 [ruff project]: https://github.com/charliermarsh/ruff
 
-## Features
+VibeML democratizes AI model training by providing natural language access to multi-cloud GPU resources through MCP (Model Context Protocol) and SkyPilot.
 
-- TODO
+## ✨ Features
 
-## Requirements
+- **Conversational Interface**: Launch training jobs using natural language through Claude or ChatGPT
+- **Multi-Cloud Support**: Seamlessly deploy across AWS, GCP, Azure, and Nebius Cloud
+- **Cost Optimization**: Automatic GPU selection, spot instance management, and budget tracking
+- **Pre-configured Workflows**: Unsloth, LoRA, and full fine-tuning templates ready to use
+- **MCP Integration**: First-class support for Model Context Protocol
+- **Production Ready**: Comprehensive error handling, validation, and monitoring
 
-- TODO
+## 🚀 Quick Start
+
+```bash
+# Install VibeML
+uv tool install vibeml
+
+# Launch your first training job
+vibeml launch-training \
+  --model meta-llama/Llama-3.2-1B \
+  --dataset tatsu-lab/alpaca \
+  --workflow unsloth \
+  --gpu-type L40S \
+  --max-cost 15.0
+```
+
+Or use with Claude Code via MCP:
+```
+"Train Llama-3.2-1B on the Alpaca dataset using Nebius L40S GPUs with a $15 budget"
+```
+
+## 📋 Requirements
+
+- Python 3.10 or higher
+- Cloud provider account (Nebius, AWS, GCP, or Azure)
+- HuggingFace account (for accessing models and datasets)
 
 ## Installation
 
@@ -42,31 +73,61 @@ The pre-compiled wheels are built using `mypyc` and will be used automatically i
 
 Please see the [Command-line Reference] for details.
 
-## Development
+## 📚 Documentation
+
+Comprehensive documentation is available at [vibeml.readthedocs.io](https://vibeml.readthedocs.io/):
+
+- **[Get Started](https://vibeml.readthedocs.io/en/latest/get-started/)** - Installation and quick start guide
+- **[Concepts](https://vibeml.readthedocs.io/en/latest/concepts/)** - Architecture and core concepts
+- **[How-to Guides](https://vibeml.readthedocs.io/en/latest/how-to/)** - Practical task-oriented guides
+- **[API Reference](https://vibeml.readthedocs.io/en/latest/reference/)** - Complete CLI and Python API documentation
+
+### Building Documentation Locally
+
+```bash
+# Install documentation dependencies
+uv pip install -r docs/requirements.txt
+
+# Serve documentation with live reload
+mkdocs serve
+
+# Build static site
+mkdocs build
+```
+
+The documentation is built using [MkDocs](https://www.mkdocs.org/) with the [Material theme](https://squidfunk.github.io/mkdocs-material/).
+
+## 🛠️ Development
 
 To contribute to this project, please see the [Contributor Guide].
 
-### Mypyc Compilation
+### Development Setup
 
-This project can be compiled with `mypyc` to produce a high-performance version of the package. The compilation is optional and is controlled by an environment variable.
+```bash
+# Clone the repository
+git clone https://github.com/prassanna-ravishankar/vibeml.git
+cd vibeml
 
-To build and install the compiled version locally, you can use the `tests_compiled` nox session:
+# Install development dependencies
+uv sync --group dev
 
-```console
-$ nox -s tests_compiled
+# Run tests
+nox -s tests
+
+# Run linting
+nox -s pre-commit
+
+# Run type checking
+nox -s mypy
 ```
 
-This will set the `VIBEML_COMPILE_MYPYC=1` environment variable, which triggers the compilation logic in `setup.py`. The compiled package will be installed in editable mode in a new virtual environment.
+### Documentation Workflow
 
-You can also build the compiled wheels for distribution using the `cibuildwheel` workflow, which is configured to run on releases. If you want to build the wheels locally, you can use `cibuildwheel` directly:
-
-```console
-$ pip install cibuildwheel
-$ export VIBEML_COMPILE_MYPYC=1
-$ cibuildwheel --output-dir wheelhouse
-```
-
-This will create the compiled wheels in the `wheelhouse` directory.
+1. Make changes to documentation in `docs/`
+2. Preview locally with `mkdocs serve`
+3. Pre-commit hooks automatically validate documentation
+4. GitHub Actions builds and deploys on push to main
+5. ReadTheDocs builds on all commits for versioned docs
 
 ## Contributing
 

@@ -189,11 +189,92 @@
         ],
         "status": "done",
         "subtasks": []
+      },
+      {
+        "id": 15,
+        "title": "Integrate Material MkDocs Documentation Platform",
+        "description": "Stand up a MkDocs-based documentation system using the Material theme, migrate existing content into a best-practice information architecture, and automate publication to GitHub Pages and Read the Docs with quality checks in pre-commit.",
+        "details": "- Add MkDocs tooling: update `pyproject.toml` docs extras (and `docs/requirements.txt`) to include `mkdocs`, `mkdocs-material`, `mkdocstrings[python]`, `mkdocs-section-index`, and `mkdocs-awesome-pages-plugin`; keep Sphinx pins only if still needed elsewhere.\n- Author a top-level `mkdocs.yml` configuring site metadata, `nav` for Get Started → Internals taxonomy, Material palette with light/dark toggle, navigation tabs, instant loading, code-copy buttons, and the required plugins (mkdocstrings handler pointed at `src/`).\n- Restructure `docs/`: migrate existing Sphinx Markdown (`docs/index.md`, `docs/usage.md`, etc.) into MkDocs pages under folders like `docs/get-started/`, `docs/concepts/`, `docs/how-to/`, `docs/reference/`, `docs/internals/`, and `docs/playbooks/`; add tutorials demonstrating real workflows that call the CLI (`src/vibeml/__main__.py`) and scripts module (`src/vibeml/scripts/generator.py`).\n- Configure `mkdocstrings` sections to auto-render Pydantic models from `src/vibeml/models.py`, job orchestration code (`src/vibeml/cloud/cost_estimator.py`, `src/vibeml/tasks.py`), and MCP interfaces (`src/vibeml/server.py`), including handler options for dataclasses/pydantic summaries and cross-reference anchors.\n- Add reference content for CLI commands and MCP endpoints by embedding code snippets and `:::` directives, leveraging Material’s content tabs to show CLI vs. Python usage examples.\n- Create `.github/workflows/docs.yml` that installs docs deps, runs `mkdocs build --strict`, and deploys to GitHub Pages via `actions/deploy-pages`; add environment protection steps (e.g., caching, concurrency) and conditionals for tagged releases vs. main branch.\n- Provide Read the Docs compatibility: add `readthedocs.yml` targeting MkDocs, referencing `docs/requirements.txt`, and enabling preview build artifacts.\n- Extend `.pre-commit-config.yaml` with MkDocs validation (local hook running `mkdocs build --strict --config-file mkdocs.yml`), Markdown linting, broken-link checking, and YAML formatting for nav files; ensure hook ordering avoids redundant installs.\n- Update `README.md` to describe the new documentation workflow, local preview instructions (`mkdocs serve`), and links to published docs.",
+        "testStrategy": "- Run `uv pip install -r docs/requirements.txt` (or `pip install`) and execute `mkdocs build --strict` locally to confirm the nav, plugins, and mkdocstrings resolve without warnings.\n- Start `mkdocs serve` and spot-check Get Started, Concepts, and Reference sections for correct Material features (tabs, instant navigation, copy buttons) and accurate API auto-generation for `TrainingRequest` and related models.\n- Execute `pre-commit run --all-files` to ensure documentation hooks and linting pass.\n- Trigger the new GitHub Actions workflow via `act` or dry run review to verify build + deploy stages, and confirm Read the Docs configuration by running `readthedocs-build` locally or reviewing its YAML for correctness.",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update documentation dependency manifests",
+            "description": "Review and modify doc-related dependencies to support Material MkDocs.",
+            "dependencies": [],
+            "details": "Update `pyproject.toml` extras and `docs/requirements.txt` to include MkDocs Material stack while retaining Sphinx pins only if required elsewhere.",
+            "status": "done",
+            "testStrategy": "Run `uv pip install -r docs/requirements.txt` to verify dependency resolution succeeds."
+          },
+          {
+            "id": 2,
+            "title": "Author comprehensive mkdocs.yml configuration",
+            "description": "Create a Material-themed MkDocs configuration covering site metadata and navigation.",
+            "dependencies": [
+              1
+            ],
+            "details": "Write `mkdocs.yml` with site metadata, Material theme options, navigation taxonomy, required plugins, and mkdocstrings handlers pointing at project modules.\n<info added on 2025-10-26T21:30:34.533Z>\nLooking at the mkdocs.yml file that was created, I can see the comprehensive configuration is complete and functional.Successfully implemented mkdocs.yml configuration file at project root with all requested features. The configuration includes Material theme with automatic light/dark mode switching, comprehensive navigation structure organized into logical sections (Get Started → Concepts → How-to → Reference → Internals → Playbooks), and mkdocstrings integration properly configured for Python docstring parsing using Google style. Added extensive markdown extensions including Mermaid diagram support, tabbed content, code highlighting with copy buttons, and admonitions. Configured mike versioning provider for multi-version documentation support. Navigation tabs are enabled with sticky positioning and instant loading for improved user experience. All plugin configurations are optimized for the project's Python codebase structure with source path pointing to src/ directory.\n</info added on 2025-10-26T21:30:34.533Z>",
+            "status": "done",
+            "testStrategy": "Execute `mkdocs build --strict` to ensure the configuration loads without errors."
+          },
+          {
+            "id": 3,
+            "title": "Restructure docs content into MkDocs IA",
+            "description": "Migrate existing Markdown into the new folder structure with tutorials and references.",
+            "dependencies": [
+              2
+            ],
+            "details": "Organize `docs/` into Get Started, Concepts, How-To, Reference, Internals, and Playbooks sections while adding CLI and script tutorials plus mkdocstrings reference pages.",
+            "status": "done",
+            "testStrategy": "Preview via `mkdocs serve` and verify each navigation section renders expected content."
+          },
+          {
+            "id": 4,
+            "title": "Set up documentation automation workflows",
+            "description": "Implement GitHub Pages and Read the Docs automation for the MkDocs site.",
+            "dependencies": [
+              3
+            ],
+            "details": "Create `.github/workflows/docs.yml` for strict builds and deploys, add caching and branch conditions, and author `readthedocs.yml` referencing docs requirements with preview builds enabled.",
+            "status": "done",
+            "testStrategy": "Trigger workflow locally with `act` or dry-run checks; confirm RTD config passes validation using `readthedocs-build` if available."
+          },
+          {
+            "id": 5,
+            "title": "Enhance pre-commit hooks for docs quality gates",
+            "description": "Integrate MkDocs, Markdown linting, link checking, and YAML formatting into pre-commit.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Extend `.pre-commit-config.yaml` with hooks for `mkdocs build --strict`, markdown linting, link validation, and YAML formatting while ordering hooks to avoid redundant installs.",
+            "status": "done",
+            "testStrategy": "Run `pre-commit run --all-files` to ensure new hooks execute successfully."
+          },
+          {
+            "id": 6,
+            "title": "Update README with MkDocs workflow guidance",
+            "description": "Document the new docs workflow, preview tooling, and publication targets.",
+            "dependencies": [
+              3,
+              4,
+              5
+            ],
+            "details": "Revise `README.md` to explain MkDocs usage, local preview commands, and links to GitHub Pages and Read the Docs outputs, including contribution tips.",
+            "status": "done",
+            "testStrategy": "Manually review the rendered README (e.g., GitHub preview) to ensure clarity and correct links."
+          }
+        ]
       }
     ],
     "metadata": {
       "created": "2025-10-26T20:40:28.632Z",
-      "updated": "2025-10-26T21:08:57.158Z",
+      "updated": "2025-10-26T21:38:09.211Z",
       "description": "Tasks for master context"
     }
   }
