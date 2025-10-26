@@ -20,6 +20,7 @@ from .models import (
     CostEstimate,
     WorkflowMetadata,
 )
+from .persistence import JobsRepository
 
 
 # Initialize FastMCP server
@@ -27,8 +28,27 @@ mcp = FastMCP("vibeml", version="0.0.1")
 mcp.description = "Natural language interface for AI model training on Nebius Cloud"
 
 
-# Store active clusters for tracking
+# Initialize job persistence repository
+_repository: Optional[JobsRepository] = None
+
+# Store active clusters for tracking (synced with database)
 ACTIVE_CLUSTERS: Dict[str, JobHandle] = {}
+
+
+async def _get_repository() -> JobsRepository:
+    """Get or initialize the jobs repository.
+
+    Lazy initialization to ensure it's created in the async context.
+    """
+    global _repository
+    if _repository is None:
+        _repository = JobsRepository()
+        # Hydrate ACTIVE_CLUSTERS from persisted jobs
+        active_jobs = await _repository.list_active()
+        for job in active_jobs:
+            ACTIVE_CLUSTERS[job.job_id] = job
+        print(f"Loaded {len(active_jobs)} active jobs from persistence layer")
+    return _repository
 
 
 @mcp.tool()
@@ -134,8 +154,12 @@ async def launch_training(
             metadata={"handle": cluster_handle, "task_args": task_args},
         )
 
-        # Store cluster info
+        # Store cluster info in memory and persist to database
         ACTIVE_CLUSTERS[cluster_id] = job_handle
+
+        # Persist job to database
+        repository = await _get_repository()
+        await repository.save_job(job_handle)
 
         return {
             "cluster_id": cluster_id,
@@ -169,11 +193,20 @@ async def get_training_status(cluster_id: str) -> Dict[str, Any]:
         Dict with cluster status, logs preview, and resource usage
     """
     try:
-        if cluster_id not in ACTIVE_CLUSTERS:
-            return {
-                "status": "error",
-                "message": f"Cluster {cluster_id} not found in active clusters",
-            }
+        repository = await _get_repository()
+
+        # Try to get from memory first, then from database
+        job_handle = ACTIVE_CLUSTERS.get(cluster_id)
+        if not job_handle:
+            job_handle = await repository.get_job(cluster_id)
+            if not job_handle:
+                return {
+                    "status": "error",
+                    "message": f"Cluster {cluster_id} not found",
+                }
+            # Restore to ACTIVE_CLUSTERS if it's still active
+            if job_handle.status in [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.REVIEW]:
+                ACTIVE_CLUSTERS[cluster_id] = job_handle
 
         # Get cluster status using SkyPilot
         loop = asyncio.get_event_loop()
@@ -183,7 +216,7 @@ async def get_training_status(cluster_id: str) -> Dict[str, Any]:
         )
 
         # Parse status (this is simplified - actual implementation would parse the output)
-        job_handle = ACTIVE_CLUSTERS[cluster_id]
+        # In production, we'd parse status_output to update job_handle.status
 
         return {
             "cluster_id": cluster_id,
@@ -240,8 +273,17 @@ async def stop_training(cluster_id: str, download_results: bool = True) -> Dict[
             lambda: sky.down(cluster_id)
         )
 
-        # Remove from active clusters
-        del ACTIVE_CLUSTERS[cluster_id]
+        # Update status in database
+        repository = await _get_repository()
+        await repository.update_status(
+            job_id=cluster_id,
+            status=JobStatus.TERMINATED,
+            metadata_updates={"stopped_at": datetime.now(UTC).isoformat()} if download_results else {}
+        )
+
+        # Remove from active clusters (still in DB for history)
+        if cluster_id in ACTIVE_CLUSTERS:
+            del ACTIVE_CLUSTERS[cluster_id]
 
         return {
             "status": "stopped",
@@ -372,7 +414,17 @@ async def list_active_training_jobs() -> Dict[str, Any]:
     Returns:
         Dict with list of active training clusters
     """
-    if not ACTIVE_CLUSTERS:
+    repository = await _get_repository()
+
+    # Get active jobs from database (authoritative source)
+    active_jobs = await repository.list_active()
+
+    # Sync ACTIVE_CLUSTERS with database
+    ACTIVE_CLUSTERS.clear()
+    for job in active_jobs:
+        ACTIVE_CLUSTERS[job.job_id] = job
+
+    if not active_jobs:
         return {
             "active_jobs": [],
             "count": 0,
@@ -380,9 +432,9 @@ async def list_active_training_jobs() -> Dict[str, Any]:
         }
 
     jobs = []
-    for cluster_id, job_handle in ACTIVE_CLUSTERS.items():
+    for job_handle in active_jobs:
         jobs.append({
-            "cluster_id": cluster_id,
+            "cluster_id": job_handle.job_id,
             "workflow": job_handle.workflow,
             "model": job_handle.model,
             "dataset": job_handle.dataset,

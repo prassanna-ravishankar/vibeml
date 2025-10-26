@@ -196,7 +196,7 @@
         "description": "Stand up a MkDocs-based documentation system using the Material theme, migrate existing content into a best-practice information architecture, and automate publication to GitHub Pages and Read the Docs with quality checks in pre-commit.",
         "details": "- Add MkDocs tooling: update `pyproject.toml` docs extras (and `docs/requirements.txt`) to include `mkdocs`, `mkdocs-material`, `mkdocstrings[python]`, `mkdocs-section-index`, and `mkdocs-awesome-pages-plugin`; keep Sphinx pins only if still needed elsewhere.\n- Author a top-level `mkdocs.yml` configuring site metadata, `nav` for Get Started → Internals taxonomy, Material palette with light/dark toggle, navigation tabs, instant loading, code-copy buttons, and the required plugins (mkdocstrings handler pointed at `src/`).\n- Restructure `docs/`: migrate existing Sphinx Markdown (`docs/index.md`, `docs/usage.md`, etc.) into MkDocs pages under folders like `docs/get-started/`, `docs/concepts/`, `docs/how-to/`, `docs/reference/`, `docs/internals/`, and `docs/playbooks/`; add tutorials demonstrating real workflows that call the CLI (`src/vibeml/__main__.py`) and scripts module (`src/vibeml/scripts/generator.py`).\n- Configure `mkdocstrings` sections to auto-render Pydantic models from `src/vibeml/models.py`, job orchestration code (`src/vibeml/cloud/cost_estimator.py`, `src/vibeml/tasks.py`), and MCP interfaces (`src/vibeml/server.py`), including handler options for dataclasses/pydantic summaries and cross-reference anchors.\n- Add reference content for CLI commands and MCP endpoints by embedding code snippets and `:::` directives, leveraging Material’s content tabs to show CLI vs. Python usage examples.\n- Create `.github/workflows/docs.yml` that installs docs deps, runs `mkdocs build --strict`, and deploys to GitHub Pages via `actions/deploy-pages`; add environment protection steps (e.g., caching, concurrency) and conditionals for tagged releases vs. main branch.\n- Provide Read the Docs compatibility: add `readthedocs.yml` targeting MkDocs, referencing `docs/requirements.txt`, and enabling preview build artifacts.\n- Extend `.pre-commit-config.yaml` with MkDocs validation (local hook running `mkdocs build --strict --config-file mkdocs.yml`), Markdown linting, broken-link checking, and YAML formatting for nav files; ensure hook ordering avoids redundant installs.\n- Update `README.md` to describe the new documentation workflow, local preview instructions (`mkdocs serve`), and links to published docs.",
         "testStrategy": "- Run `uv pip install -r docs/requirements.txt` (or `pip install`) and execute `mkdocs build --strict` locally to confirm the nav, plugins, and mkdocstrings resolve without warnings.\n- Start `mkdocs serve` and spot-check Get Started, Concepts, and Reference sections for correct Material features (tabs, instant navigation, copy buttons) and accurate API auto-generation for `TrainingRequest` and related models.\n- Execute `pre-commit run --all-files` to ensure documentation hooks and linting pass.\n- Trigger the new GitHub Actions workflow via `act` or dry run review to verify build + deploy stages, and confirm Read the Docs configuration by running `readthedocs-build` locally or reviewing its YAML for correctness.",
-        "status": "done",
+        "status": "in-progress",
         "dependencies": [
           1
         ],
@@ -270,11 +270,80 @@
             "testStrategy": "Manually review the rendered README (e.g., GitHub preview) to ensure clarity and correct links."
           }
         ]
+      },
+      {
+        "id": 16,
+        "title": "Implement Durable Job Persistence Layer",
+        "description": "Persist VibeML training jobs across MCP server restarts by introducing a durable storage layer and wiring it into the FastMCP runtime.",
+        "details": "• Add a `src/vibeml/persistence/` package with a `jobs_repository.py` module that maps the existing `JobHandle` schema (see src/vibeml/models.py) to a SQLite-backed store. Use a single-writer pattern with WAL mode, `sqlite3` or SQLAlchemy/SQLModel metadata, and a lightweight `JobRecord` Pydantic model to serialize datetimes, enum values, and the `metadata` blob.\n• Initialize the repository during server startup (hydrate in `src/vibeml/server.py:31`) so that persisted jobs repopulate `ACTIVE_CLUSTERS`, and expose async-safe CRUD helpers (`save_job`, `update_status`, `list_active`, `purge_completed`). Wrap blocking DB work in `asyncio.to_thread` or adopt `aiosqlite` to keep the FastMCP event loop responsive.\n• Replace direct dictionary writes in `launch_training` and `get_training_status` (`src/vibeml/server.py:70-150`) with persistence calls. Ensure status updates, cost estimates, and termination paths call `update_status` and keep `ACTIVE_CLUSTERS` in sync with the durable state.\n• Store the database file under the existing preferences directory (reuse `PreferencesManager` from `src/vibeml/config/preferences.py` so paths remain user-configurable) and document rotation/backups via structured logging hooks already introduced in Task 14.\n• Add migration/bootstrap logic (CREATE TABLE IF NOT EXISTS, PRAGMA schema version) and defensive error handling using the `SkyPilotError` / `ValidationError` patterns from `src/vibeml/exceptions.py` so persistence failures surface actionable guidance.",
+        "testStrategy": "• Unit-test the repository with an in-memory SQLite URL or tmp path to assert `save_job`, `get_job`, and `update_status` round-trip a `JobHandle` while retaining enum values and metadata.\n• Add an async test that exercises `launch_training` with SkyPilot mocked, verifies the repository captures the new job record, and that reloading the server module hydrates `ACTIVE_CLUSTERS` from disk.\n• Simulate concurrent status updates (async tasks calling `update_status`) to ensure locking prevents race conditions and persisted state remains consistent.\n• Smoke-test restart resilience by persisting a job, re-importing `src.vibeml.server`, and confirming downstream APIs (`get_training_status`, `terminate_job` if available) operate on the restored record.",
+        "status": "pending",
+        "dependencies": [
+          3,
+          9
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Design durable job persistence architecture",
+            "description": "Map out the SQLite-backed job repository and schema structure for durable storage.",
+            "dependencies": [],
+            "details": "Document table schema, JobRecord fields, WAL configuration, and single-writer pattern choices aligned with JobHandle requirements.",
+            "status": "done",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Implement SQLite jobs repository module",
+            "description": "Create the persistence package and build the JobRecord repository with CRUD helpers.",
+            "dependencies": [
+              1
+            ],
+            "details": "Add src/vibeml/persistence/jobs_repository.py with JobRecord Pydantic model, sqlite3/SQLModel setup, migration bootstrap, and async-safe wrappers.",
+            "status": "done",
+            "testStrategy": "Use in-memory SQLite to verify save, fetch, update status, and error handling behaviors."
+          },
+          {
+            "id": 3,
+            "title": "Integrate repository into server lifecycle",
+            "description": "Initialize and hydrate the repository during FastMCP server startup and shutdown.",
+            "dependencies": [
+              2
+            ],
+            "details": "Hook repository into src/vibeml/server.py startup, repopulate ACTIVE_CLUSTERS from persisted jobs, ensure preferences path handling, and manage graceful teardown.",
+            "status": "done",
+            "testStrategy": "Add startup sequence test using a temporary DB to ensure ACTIVE_CLUSTERS gets repopulated."
+          },
+          {
+            "id": 4,
+            "title": "Refactor job launch and status flows to persist state",
+            "description": "Replace in-memory job dictionary writes with repository operations in server logic.",
+            "dependencies": [
+              3
+            ],
+            "details": "Update launch_training, get_training_status, termination paths to call repository save/update helpers, maintain ACTIVE_CLUSTERS sync, and propagate SkyPilotError/ValidationError handling.",
+            "status": "done",
+            "testStrategy": "Mock repository in async tests to confirm status updates and termination paths persist correctly."
+          },
+          {
+            "id": 5,
+            "title": "Add persistence-focused tests and logging hooks",
+            "description": "Cover repository operations and persistence-aware job flows with automated tests and logging.",
+            "dependencies": [
+              2,
+              4
+            ],
+            "details": "Implement unit/integration tests for persistence, ensure structured logging documents rotation/backups, and validate metadata serialization across job lifecycle.",
+            "status": "done",
+            "testStrategy": "Combine repository unit tests and async integration test invoking launch_training with mocked dependencies."
+          }
+        ]
       }
     ],
     "metadata": {
       "created": "2025-10-26T20:40:28.632Z",
-      "updated": "2025-10-26T21:38:09.211Z",
+      "updated": "2025-10-26T23:40:09.676Z",
       "description": "Tasks for master context"
     }
   }

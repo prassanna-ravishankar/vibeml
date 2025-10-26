@@ -1,8 +1,8 @@
 {
 	"meta": {
-		"generatedAt": "2025-10-26T21:28:45.521Z",
+		"generatedAt": "2025-10-26T23:34:30.382Z",
 		"tasksAnalyzed": 1,
-		"totalTasks": 15,
+		"totalTasks": 16,
 		"analysisCount": 1,
 		"thresholdScore": 5,
 		"projectName": "Taskmaster",
@@ -10,12 +10,12 @@
 	},
 	"complexityAnalysis": [
 		{
-			"taskId": 15,
-			"taskTitle": "Integrate Material MkDocs Documentation Platform",
+			"taskId": 16,
+			"taskTitle": "Implement Durable Job Persistence Layer",
 			"complexityScore": 7,
-			"recommendedSubtasks": 6,
-			"expansionPrompt": "Break the MkDocs migration into discrete steps covering dependency updates, mkdocs.yml creation, docs content restructuring, automation workflows (GitHub Pages + Read the Docs), pre-commit enhancements, and README/test instruction updates.",
-			"reasoning": "The repository currently ships Sphinx-based docs (`docs/conf.py`, `docs/*.md`) with Sphinx dependencies declared in `pyproject.toml` and `docs/requirements.txt`. Implementing Material for MkDocs requires replacing this toolchain, creating a comprehensive `mkdocs.yml`, and reorganising all existing Markdown into a new folder structure with additional tutorial content tied to real modules (`src/vibeml/__main__.py`, `src/vibeml/scripts/generator.py`, `src/vibeml/tasks.py`, `src/vibeml/cloud/cost_estimator.py`, `src/vibeml/server.py`). Automation adds further scope: a new GitHub Actions workflow under `.github/workflows/`, Read the Docs config, and expanded `.pre-commit-config.yaml` checks. Ensuring `mkdocstrings` renders the referenced modules without import errors plus validating strict builds locally raises coordination and testing effort beyond a straightforward docs change, though no deep algorithmic work is required."
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Decompose the persistence layer work: include designing the SQLite-backed repository and schema, wiring repository lifecycle into server startup/shutdown, refactoring job launch/status/stop paths to persist state, handling metadata serialization & async safety, and adding focused unit/integration tests.",
+			"reasoning": "Requires introducing a new SQLite persistence module, integrating it with existing FastMCP server lifecycle, refactoring multiple job management paths to replace in-memory dict access, solving metadata serialization and async blocking concerns, adding defensive error handling, and building both repository-level and async server tests; moderate architectural change with non-trivial testing."
 		}
 	]
 }
