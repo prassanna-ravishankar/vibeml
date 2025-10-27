@@ -24,14 +24,17 @@
 
 VibeML democratizes AI model training by providing natural language access to multi-cloud GPU resources through MCP (Model Context Protocol) and SkyPilot.
 
+**Architecture**: VibeML is a thin MCP wrapper around SkyPilot's Python API. SkyPilot handles all cluster provisioning, state management, and cloud orchestration - VibeML adds natural language interface, cost estimation, and workflow templates.
+
 ## ✨ Features
 
 - **Conversational Interface**: Launch training jobs using natural language through Claude or ChatGPT
+- **SkyPilot-Powered**: Built on SkyPilot for robust multi-cloud orchestration and state management
 - **Multi-Cloud Support**: Seamlessly deploy across AWS, GCP, Azure, and Nebius Cloud
 - **Cost Optimization**: Automatic GPU selection, spot instance management, and budget tracking
 - **Pre-configured Workflows**: Unsloth, LoRA, and full fine-tuning templates ready to use
 - **MCP Integration**: First-class support for Model Context Protocol
-- **Production Ready**: Comprehensive error handling, validation, and monitoring
+- **Zero State Management**: Job state managed by SkyPilot (`~/.sky/state.json`) - survives restarts
 
 ## 🚀 Quick Start
 

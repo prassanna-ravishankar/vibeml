@@ -346,7 +346,7 @@
         "description": "Rewrite the product requirements and refactor the MCP server to drop the custom job persistence in favour of SkyPilot’s built-in job state and APIs.",
         "details": "- Rewrite the PRD/architecture narrative in `docs/concepts/architecture.md` (and adjust `mkdocs.yml` nav if needed) so it specifies that VibeML is a thin MCP wrapper over SkyPilot, highlights `sky.launch`, `sky.status`, `sky.jobs` data sourced from `~/.sky/state.json`, and clarifies lifecycle expectations (launch → SkyPilot-managed state → teardown) with updated diagrams and call flows.\n- Remove the durable storage layer by deleting `src/vibeml/persistence/` and `tests/test_persistence.py`, cleaning up any `JobsRepository` imports, exports, and packaging hooks so no SQLite references remain.\n- Simplify `src/vibeml/server.py` so each MCP tool interacts directly with SkyPilot: keep the executor-based `sky.launch` call, replace `_get_repository`/`ACTIVE_CLUSTERS` lookups with a helper that calls `sky.status(cluster_names=[cluster_id], refresh=True)` and reads SkyPilot’s state JSON for fallbacks, map SkyPilot job states (e.g., `INIT`, `RUNNING`, `SUCCEEDED`, `FAILED`, `STOPPED`) to `JobStatus`, and ensure `stop_training` / `list_active_training_jobs` emit data sourced from the SkyPilot API instead of any local cache.\n- Update `src/vibeml/models.py` (and any serializers) so `JobHandle` is populated from SkyPilot status rows/handles rather than persisted DB records, including adding a status mapping layer and optional metadata drawn from `sky.jobs` (e.g., submission time, resources, cost fields when available).\n- Refresh docs and task guidance that referenced a bespoke job tracker—e.g., edit `docs/get-started/installation.md`, `docs/get-started/quickstart.md`, `docs/playbooks/index.md`, and `docs/how-to/use-mcp.md` to instruct users to rely on `sky status`, `sky logs`, and the SkyPilot state file, and document the MCP ↔ SkyPilot integration contract (request schemas, polling strategy, teardown) in `docs/reference/mcp.md`.\n- Add/adjust automated coverage so new SkyPilot integration paths are exercised: create async unit tests (e.g., `tests/test_server_status.py`) that monkeypatch `sky.launch`, `sky.status`, and `sky.down` to return realistic objects/DataFrames, verifying status translation and error handling without any SQLite fixtures.",
         "testStrategy": "- Add unit tests for the new SkyPilot adapters/server helpers (`pytest tests/test_server_status.py`) to confirm state translation, error propagation, and teardown behaviour, and remove the obsolete persistence test module.\n- Run `nox -s tests` (or `pytest`) and `nox -s mypy` to ensure the refactor keeps type-checking and existing suites passing.\n- Lint the touched code with `ruff check src/vibeml tests` to confirm imports and async helpers remain clean.\n- Build the docs with `mkdocs build --strict` to validate the rewritten PRD, navigation updates, and new integration guidance render without warnings.",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           16
         ],
@@ -402,7 +402,7 @@
               4
             ],
             "details": "Edit docs/get-started/installation.md, docs/get-started/quickstart.md, docs/playbooks/index.md, docs/how-to/use-mcp.md, and docs/reference/mcp.md to document the MCP ↔ SkyPilot contract, CLI usage, and lifecycle expectations.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Rebuild docs (`mkdocs build`) and spot-check updated sections for accuracy and cross-links."
           },
           {
@@ -414,7 +414,7 @@
               4
             ],
             "details": "Create async pytest modules (e.g., tests/test_server_status.py) that mock sky.launch/status/down responses to exercise status translation, error handling, and teardown paths.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Run `pytest tests/test_server_status.py` to verify the new asynchronous tests pass and cover key scenarios."
           }
         ]
@@ -422,7 +422,7 @@
     ],
     "metadata": {
       "created": "2025-10-26T20:40:28.632Z",
-      "updated": "2025-10-27T00:06:27.062Z",
+      "updated": "2025-10-27T00:14:27.434Z",
       "description": "Tasks for master context"
     }
   }

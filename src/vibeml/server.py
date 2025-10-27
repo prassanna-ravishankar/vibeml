@@ -30,6 +30,7 @@ def _map_sky_status_to_job_status(sky_status: str) -> JobStatus:
     """Map SkyPilot cluster status to VibeML JobStatus.
 
     SkyPilot statuses: INIT, UP, STOPPED, TERMINATED
+    Unknown statuses are mapped to FAILED as they likely indicate issues.
     """
     status_map = {
         "INIT": JobStatus.PENDING,
@@ -37,7 +38,7 @@ def _map_sky_status_to_job_status(sky_status: str) -> JobStatus:
         "STOPPED": JobStatus.TERMINATED,
         "TERMINATED": JobStatus.TERMINATED,
     }
-    return status_map.get(sky_status, JobStatus.UNKNOWN)
+    return status_map.get(sky_status, JobStatus.FAILED)
 
 
 async def _get_cluster_from_skypilot(cluster_id: str) -> Optional[Dict[str, Any]]:

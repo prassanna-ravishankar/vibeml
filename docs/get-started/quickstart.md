@@ -25,9 +25,9 @@ vibeml launch-training \
 1. **Validates** the model and dataset exist on HuggingFace Hub
 2. **Calculates** GPU memory requirements (L40S has 48GB, perfect for 1B model)
 3. **Estimates** cost (~$12-15 for 10-13 hours on L40S spot instances)
-4. **Generates** a training script using the Unsloth template
-5. **Launches** the job on Nebius Cloud
-6. **Returns** a job handle for monitoring
+4. **Generates** a SkyPilot Task using the Unsloth template
+5. **Launches** via SkyPilot on Nebius Cloud
+6. **Returns** cluster ID for monitoring via `sky status`
 
 ### Expected Output
 
@@ -51,16 +51,25 @@ vibeml launch-training \
 
 ## Monitor Your Job
 
-Check the status of your training job:
+VibeML uses **SkyPilot to manage job state** - all monitoring goes through SkyPilot commands:
+
+Check the status directly via SkyPilot:
+
+```bash
+sky status vibeml-llama-3-2-1b-20251026
+```
+
+Or via VibeML's MCP tools:
 
 ```bash
 vibeml get-job-status --cluster vibeml-llama-3-2-1b-20251026
 ```
 
-List all active jobs:
+List all active VibeML jobs (queries SkyPilot state):
 
 ```bash
 vibeml list-jobs
+# Or directly: sky status | grep vibeml-
 ```
 
 ## Download Results
@@ -161,6 +170,24 @@ sequenceDiagram
 - **[Explore workflows](../concepts/workflows.md)** - Unsloth, LoRA, and custom templates
 - **[Manage budgets](../how-to/track-budgets.md)** - Set up cost tracking and alerts
 - **[Debug issues](../how-to/debug-cloud.md)** - Troubleshoot common problems
+
+## Understanding VibeML + SkyPilot
+
+!!! info "How Job State Works"
+    VibeML **does not maintain its own job database**. Instead:
+
+    - **SkyPilot** maintains job state in `~/.sky/state.json`
+    - **VibeML** queries SkyPilot's state via Python API (`sky.status()`, `sky.jobs()`)
+    - Jobs persist across VibeML server restarts (SkyPilot is authoritative)
+    - You can use `sky` CLI commands directly anytime
+
+    This means:
+
+    ```bash
+    # These work equivalently:
+    vibeml list-jobs              # VibeML MCP tool
+    sky status | grep vibeml-     # Direct SkyPilot command
+    ```
 
 ## Troubleshooting
 
