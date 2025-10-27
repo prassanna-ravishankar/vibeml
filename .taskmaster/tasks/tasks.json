@@ -277,7 +277,7 @@
         "description": "Persist VibeML training jobs across MCP server restarts by introducing a durable storage layer and wiring it into the FastMCP runtime.",
         "details": "• Add a `src/vibeml/persistence/` package with a `jobs_repository.py` module that maps the existing `JobHandle` schema (see src/vibeml/models.py) to a SQLite-backed store. Use a single-writer pattern with WAL mode, `sqlite3` or SQLAlchemy/SQLModel metadata, and a lightweight `JobRecord` Pydantic model to serialize datetimes, enum values, and the `metadata` blob.\n• Initialize the repository during server startup (hydrate in `src/vibeml/server.py:31`) so that persisted jobs repopulate `ACTIVE_CLUSTERS`, and expose async-safe CRUD helpers (`save_job`, `update_status`, `list_active`, `purge_completed`). Wrap blocking DB work in `asyncio.to_thread` or adopt `aiosqlite` to keep the FastMCP event loop responsive.\n• Replace direct dictionary writes in `launch_training` and `get_training_status` (`src/vibeml/server.py:70-150`) with persistence calls. Ensure status updates, cost estimates, and termination paths call `update_status` and keep `ACTIVE_CLUSTERS` in sync with the durable state.\n• Store the database file under the existing preferences directory (reuse `PreferencesManager` from `src/vibeml/config/preferences.py` so paths remain user-configurable) and document rotation/backups via structured logging hooks already introduced in Task 14.\n• Add migration/bootstrap logic (CREATE TABLE IF NOT EXISTS, PRAGMA schema version) and defensive error handling using the `SkyPilotError` / `ValidationError` patterns from `src/vibeml/exceptions.py` so persistence failures surface actionable guidance.",
         "testStrategy": "• Unit-test the repository with an in-memory SQLite URL or tmp path to assert `save_job`, `get_job`, and `update_status` round-trip a `JobHandle` while retaining enum values and metadata.\n• Add an async test that exercises `launch_training` with SkyPilot mocked, verifies the repository captures the new job record, and that reloading the server module hydrates `ACTIVE_CLUSTERS` from disk.\n• Simulate concurrent status updates (async tasks calling `update_status`) to ensure locking prevents race conditions and persisted state remains consistent.\n• Smoke-test restart resilience by persisting a job, re-importing `src.vibeml.server`, and confirming downstream APIs (`get_training_status`, `terminate_job` if available) operate on the restored record.",
-        "status": "pending",
+        "status": "done",
         "dependencies": [
           3,
           9
@@ -339,11 +339,90 @@
             "testStrategy": "Combine repository unit tests and async integration test invoking launch_training with mocked dependencies."
           }
         ]
+      },
+      {
+        "id": 17,
+        "title": "Re-architect MCP Layer Around Native SkyPilot State",
+        "description": "Rewrite the product requirements and refactor the MCP server to drop the custom job persistence in favour of SkyPilot’s built-in job state and APIs.",
+        "details": "- Rewrite the PRD/architecture narrative in `docs/concepts/architecture.md` (and adjust `mkdocs.yml` nav if needed) so it specifies that VibeML is a thin MCP wrapper over SkyPilot, highlights `sky.launch`, `sky.status`, `sky.jobs` data sourced from `~/.sky/state.json`, and clarifies lifecycle expectations (launch → SkyPilot-managed state → teardown) with updated diagrams and call flows.\n- Remove the durable storage layer by deleting `src/vibeml/persistence/` and `tests/test_persistence.py`, cleaning up any `JobsRepository` imports, exports, and packaging hooks so no SQLite references remain.\n- Simplify `src/vibeml/server.py` so each MCP tool interacts directly with SkyPilot: keep the executor-based `sky.launch` call, replace `_get_repository`/`ACTIVE_CLUSTERS` lookups with a helper that calls `sky.status(cluster_names=[cluster_id], refresh=True)` and reads SkyPilot’s state JSON for fallbacks, map SkyPilot job states (e.g., `INIT`, `RUNNING`, `SUCCEEDED`, `FAILED`, `STOPPED`) to `JobStatus`, and ensure `stop_training` / `list_active_training_jobs` emit data sourced from the SkyPilot API instead of any local cache.\n- Update `src/vibeml/models.py` (and any serializers) so `JobHandle` is populated from SkyPilot status rows/handles rather than persisted DB records, including adding a status mapping layer and optional metadata drawn from `sky.jobs` (e.g., submission time, resources, cost fields when available).\n- Refresh docs and task guidance that referenced a bespoke job tracker—e.g., edit `docs/get-started/installation.md`, `docs/get-started/quickstart.md`, `docs/playbooks/index.md`, and `docs/how-to/use-mcp.md` to instruct users to rely on `sky status`, `sky logs`, and the SkyPilot state file, and document the MCP ↔ SkyPilot integration contract (request schemas, polling strategy, teardown) in `docs/reference/mcp.md`.\n- Add/adjust automated coverage so new SkyPilot integration paths are exercised: create async unit tests (e.g., `tests/test_server_status.py`) that monkeypatch `sky.launch`, `sky.status`, and `sky.down` to return realistic objects/DataFrames, verifying status translation and error handling without any SQLite fixtures.",
+        "testStrategy": "- Add unit tests for the new SkyPilot adapters/server helpers (`pytest tests/test_server_status.py`) to confirm state translation, error propagation, and teardown behaviour, and remove the obsolete persistence test module.\n- Run `nox -s tests` (or `pytest`) and `nox -s mypy` to ensure the refactor keeps type-checking and existing suites passing.\n- Lint the touched code with `ruff check src/vibeml tests` to confirm imports and async helpers remain clean.\n- Build the docs with `mkdocs build --strict` to validate the rewritten PRD, navigation updates, and new integration guidance render without warnings.",
+        "status": "pending",
+        "dependencies": [
+          16
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Rewrite architecture narrative for SkyPilot MCP integration",
+            "description": "Revise architecture documentation to emphasize SkyPilot-backed MCP lifecycle and interactions.",
+            "dependencies": [],
+            "details": "Update docs/concepts/architecture.md with SkyPilot-focused overview, adjust diagrams and mkdocs.yml navigation to reflect the new architecture storyline.",
+            "status": "done",
+            "testStrategy": "Build docs (e.g., `mkdocs build`) to confirm navigation and links remain valid."
+          },
+          {
+            "id": 2,
+            "title": "Remove legacy persistence package and tests",
+            "description": "Eliminate obsolete SQLite-backed persistence modules and clean related references.",
+            "dependencies": [],
+            "details": "Delete src/vibeml/persistence/ and tests/test_persistence.py, scrub JobsRepository imports/usages, and ensure packaging metadata no longer exposes persistence code.",
+            "status": "done",
+            "testStrategy": "Search for leftover persistence references (`rg \"JobsRepository\"`) and run lint/tests to catch missing imports."
+          },
+          {
+            "id": 3,
+            "title": "Refactor MCP server to source state from SkyPilot APIs",
+            "description": "Rewrite server tools to call SkyPilot for job lifecycle data instead of local stores.",
+            "dependencies": [
+              2
+            ],
+            "details": "Simplify src/vibeml/server.py by wiring tool handlers to sky.launch/sky.status/sky.jobs, add helpers for state JSON fallbacks, and map SkyPilot job states to internal JobStatus values.",
+            "status": "done",
+            "testStrategy": "Execute relevant server unit tests (once updated) and perform smoke runs of key MCP tool paths."
+          },
+          {
+            "id": 4,
+            "title": "Adapt JobHandle modelling for SkyPilot-derived data",
+            "description": "Update JobHandle and related serializers to consume SkyPilot job metadata.",
+            "dependencies": [
+              3
+            ],
+            "details": "Modify src/vibeml/models.py to populate JobHandle from SkyPilot status rows, add state-mapping utilities, and support optional metadata fields surfaced by sky.jobs.\n<info added on 2025-10-27T00:06:16.243Z>\nI'll analyze the codebase to understand the current implementation and provide an accurate update for this subtask.Based on my analysis of the codebase, I can see that the user is correct. The current implementation in `src/vibeml/server.py` already handles the mapping from SkyPilot cluster status to VibeML JobStatus using the `_map_sky_status_to_job_status()` function on lines 29-40. The `JobHandle` model in `src/vibeml/models.py` (lines 155-176) is indeed a simple DTO that works perfectly as-is for both server responses and can be populated from SkyPilot cluster information when needed.\n\nThe server refactoring (subtask 17.3) has already implemented the necessary status mapping logic, and the `JobHandle` model doesn't require any structural changes to work with SkyPilot-derived data.\n\nAnalysis confirms that JobHandle model (src/vibeml/models.py:155-176) requires no modifications. The existing DTO structure with job_id, cluster_name, status, cost_estimate, created_at, model, dataset, workflow, gpu_type, and metadata fields works perfectly for both MCP server responses and SkyPilot cluster data population. The server.py refactoring in subtask 17.3 already provides the necessary status mapping via _map_sky_status_to_job_status() function. The JobHandle can be instantiated directly from SkyPilot cluster information without any schema changes. Task complete - no model modifications needed.\n</info added on 2025-10-27T00:06:16.243Z>",
+            "status": "done",
+            "testStrategy": "Run type checks and unit tests covering JobHandle serialization to ensure new mappings behave correctly."
+          },
+          {
+            "id": 5,
+            "title": "Refresh user-facing docs for SkyPilot-based workflows",
+            "description": "Update guidance docs to instruct users on relying on SkyPilot tooling and state.",
+            "dependencies": [
+              1,
+              3,
+              4
+            ],
+            "details": "Edit docs/get-started/installation.md, docs/get-started/quickstart.md, docs/playbooks/index.md, docs/how-to/use-mcp.md, and docs/reference/mcp.md to document the MCP ↔ SkyPilot contract, CLI usage, and lifecycle expectations.",
+            "status": "pending",
+            "testStrategy": "Rebuild docs (`mkdocs build`) and spot-check updated sections for accuracy and cross-links."
+          },
+          {
+            "id": 6,
+            "title": "Add async tests for SkyPilot-backed MCP server flows",
+            "description": "Implement new tests that monkeypatch SkyPilot APIs to validate server behaviour.",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "Create async pytest modules (e.g., tests/test_server_status.py) that mock sky.launch/status/down responses to exercise status translation, error handling, and teardown paths.",
+            "status": "pending",
+            "testStrategy": "Run `pytest tests/test_server_status.py` to verify the new asynchronous tests pass and cover key scenarios."
+          }
+        ]
       }
     ],
     "metadata": {
       "created": "2025-10-26T20:40:28.632Z",
-      "updated": "2025-10-26T23:40:09.676Z",
+      "updated": "2025-10-27T00:06:27.062Z",
       "description": "Tasks for master context"
     }
   }

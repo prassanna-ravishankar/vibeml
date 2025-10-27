@@ -1,7 +1,6 @@
 """FastMCP server for VibeML - natural language interface to AI training."""
 
 import asyncio
-import json
 import uuid
 from datetime import datetime, UTC
 from typing import Dict, Any, Optional, List
@@ -20,7 +19,6 @@ from .models import (
     CostEstimate,
     WorkflowMetadata,
 )
-from .persistence import JobsRepository
 
 
 # Initialize FastMCP server
@@ -28,27 +26,52 @@ mcp = FastMCP("vibeml", version="0.0.1")
 mcp.description = "Natural language interface for AI model training on Nebius Cloud"
 
 
-# Initialize job persistence repository
-_repository: Optional[JobsRepository] = None
+def _map_sky_status_to_job_status(sky_status: str) -> JobStatus:
+    """Map SkyPilot cluster status to VibeML JobStatus.
 
-# Store active clusters for tracking (synced with database)
-ACTIVE_CLUSTERS: Dict[str, JobHandle] = {}
-
-
-async def _get_repository() -> JobsRepository:
-    """Get or initialize the jobs repository.
-
-    Lazy initialization to ensure it's created in the async context.
+    SkyPilot statuses: INIT, UP, STOPPED, TERMINATED
     """
-    global _repository
-    if _repository is None:
-        _repository = JobsRepository()
-        # Hydrate ACTIVE_CLUSTERS from persisted jobs
-        active_jobs = await _repository.list_active()
-        for job in active_jobs:
-            ACTIVE_CLUSTERS[job.job_id] = job
-        print(f"Loaded {len(active_jobs)} active jobs from persistence layer")
-    return _repository
+    status_map = {
+        "INIT": JobStatus.PENDING,
+        "UP": JobStatus.RUNNING,
+        "STOPPED": JobStatus.TERMINATED,
+        "TERMINATED": JobStatus.TERMINATED,
+    }
+    return status_map.get(sky_status, JobStatus.UNKNOWN)
+
+
+async def _get_cluster_from_skypilot(cluster_id: str) -> Optional[Dict[str, Any]]:
+    """Get cluster information from SkyPilot's state.
+
+    Args:
+        cluster_id: Cluster name to query
+
+    Returns:
+        Dict with cluster info or None if not found
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        clusters = await loop.run_in_executor(
+            None,
+            lambda: sky.status(cluster_names=[cluster_id], refresh=True)
+        )
+
+        if not clusters:
+            return None
+
+        # SkyPilot returns list of cluster records
+        # Each has: name, status, launched_at, resources, handle
+        cluster = clusters[0]
+        return {
+            "cluster_name": cluster.name,
+            "status": str(cluster.status),
+            "launched_at": cluster.launched_at,
+            "resources": cluster.resources,
+            "handle": cluster.handle,
+        }
+    except Exception as e:
+        print(f"Failed to get cluster {cluster_id} from SkyPilot: {e}")
+        return None
 
 
 @mcp.tool()
@@ -59,7 +82,10 @@ async def launch_training(
     gpu_type: Optional[str] = None,
     max_steps: Optional[int] = 60,
     max_cost: Optional[float] = None,
-    **kwargs: Any,
+    learning_rate: Optional[float] = None,
+    lora_r: Optional[int] = None,
+    max_seq_length: Optional[int] = None,
+    output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Launch a model training job on Nebius Cloud.
 
@@ -70,7 +96,10 @@ async def launch_training(
         gpu_type: GPU type (L40S, RTX4090, H100, A100) - auto-selected if not specified
         max_steps: Maximum training steps
         max_cost: Maximum cost limit in USD
-        **kwargs: Additional workflow-specific parameters
+        learning_rate: Learning rate for training
+        lora_r: LoRA rank parameter
+        max_seq_length: Maximum sequence length
+        output_dir: Output directory for results
 
     Returns:
         Dict with cluster_id, status, and launch details
@@ -89,7 +118,15 @@ async def launch_training(
                 workflow=workflow,
                 gpu_type=gpu_type,
                 max_cost=max_cost,
-                hyperparameters=kwargs,
+                hyperparameters={
+                    k: v for k, v in {
+                        "learning_rate": learning_rate,
+                        "lora_r": lora_r,
+                        "max_seq_length": max_seq_length,
+                        "output_dir": output_dir,
+                        "max_steps": max_steps,
+                    }.items() if v is not None
+                },
             )
         except PydanticValidationError as e:
             return {
@@ -98,6 +135,7 @@ async def launch_training(
                 "message": str(e),
                 "details": e.errors(),
             }
+
         # Get the workflow function
         workflow_func = get_workflow(workflow)
 
@@ -111,10 +149,15 @@ async def launch_training(
                 "gpu_type": gpu_type or "L40S",  # Default to L40S for cost-effectiveness
                 "max_steps": max_steps,
             }
-            # Add any additional kwargs that the workflow supports
-            for key in ["learning_rate", "lora_r", "max_seq_length", "output_dir"]:
-                if key in kwargs:
-                    task_args[key] = kwargs[key]
+            # Add optional workflow-specific parameters
+            if learning_rate is not None:
+                task_args["learning_rate"] = learning_rate
+            if lora_r is not None:
+                task_args["lora_r"] = lora_r
+            if max_seq_length is not None:
+                task_args["max_seq_length"] = max_seq_length
+            if output_dir is not None:
+                task_args["output_dir"] = output_dir
 
         elif workflow in ["gpt-oss-lora", "gpt-oss-full"]:
             # For GPT-OSS, model is the size (20b, 120b)
@@ -122,8 +165,8 @@ async def launch_training(
                 "model_size": model if model in ["20b", "120b"] else "20b",
                 "dataset": dataset,
             }
-            if "output_dir" in kwargs:
-                task_args["output_dir"] = kwargs["output_dir"]
+            if output_dir is not None:
+                task_args["output_dir"] = output_dir
 
         # Generate the SkyPilot task
         task = workflow_func(**task_args)
@@ -140,26 +183,6 @@ async def launch_training(
             None,
             lambda: sky.launch(task, cluster_name=cluster_id, detach_run=True)
         )
-
-        # Create JobHandle for tracking
-        job_handle = JobHandle(
-            job_id=cluster_id,
-            cluster_name=cluster_id,
-            status=JobStatus.RUNNING,
-            model=request.model,
-            dataset=request.dataset,
-            workflow=request.workflow,
-            gpu_type=request.gpu_type or task_args.get("gpu_type", "auto"),
-            created_at=datetime.now(UTC),
-            metadata={"handle": cluster_handle, "task_args": task_args},
-        )
-
-        # Store cluster info in memory and persist to database
-        ACTIVE_CLUSTERS[cluster_id] = job_handle
-
-        # Persist job to database
-        repository = await _get_repository()
-        await repository.save_job(job_handle)
 
         return {
             "cluster_id": cluster_id,
@@ -193,40 +216,24 @@ async def get_training_status(cluster_id: str) -> Dict[str, Any]:
         Dict with cluster status, logs preview, and resource usage
     """
     try:
-        repository = await _get_repository()
+        # Get cluster info directly from SkyPilot
+        cluster_info = await _get_cluster_from_skypilot(cluster_id)
 
-        # Try to get from memory first, then from database
-        job_handle = ACTIVE_CLUSTERS.get(cluster_id)
-        if not job_handle:
-            job_handle = await repository.get_job(cluster_id)
-            if not job_handle:
-                return {
-                    "status": "error",
-                    "message": f"Cluster {cluster_id} not found",
-                }
-            # Restore to ACTIVE_CLUSTERS if it's still active
-            if job_handle.status in [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.REVIEW]:
-                ACTIVE_CLUSTERS[cluster_id] = job_handle
+        if not cluster_info:
+            return {
+                "status": "error",
+                "message": f"Cluster {cluster_id} not found in SkyPilot state",
+            }
 
-        # Get cluster status using SkyPilot
-        loop = asyncio.get_event_loop()
-        status_output = await loop.run_in_executor(
-            None,
-            lambda: sky.status(cluster_names=[cluster_id], refresh=True)
-        )
-
-        # Parse status (this is simplified - actual implementation would parse the output)
-        # In production, we'd parse status_output to update job_handle.status
+        # Map SkyPilot status to our JobStatus
+        job_status = _map_sky_status_to_job_status(cluster_info["status"])
 
         return {
             "cluster_id": cluster_id,
-            "workflow": job_handle.workflow,
-            "model": job_handle.model,
-            "dataset": job_handle.dataset,
-            "gpu_type": job_handle.gpu_type,
-            "status": job_handle.status.value,
-            "created_at": job_handle.created_at.isoformat(),
-            "message": "Training in progress",
+            "status": job_status.value,
+            "sky_status": cluster_info["status"],
+            "launched_at": cluster_info["launched_at"].isoformat() if cluster_info["launched_at"] else None,
+            "message": f"Cluster is {cluster_info['status'].lower()}",
         }
 
     except Exception as e:
@@ -248,7 +255,9 @@ async def stop_training(cluster_id: str, download_results: bool = True) -> Dict[
         Dict with stop status and download location if applicable
     """
     try:
-        if cluster_id not in ACTIVE_CLUSTERS:
+        # Verify cluster exists in SkyPilot
+        cluster_info = await _get_cluster_from_skypilot(cluster_id)
+        if not cluster_info:
             return {
                 "status": "error",
                 "message": f"Cluster {cluster_id} not found",
@@ -272,18 +281,6 @@ async def stop_training(cluster_id: str, download_results: bool = True) -> Dict[
             None,
             lambda: sky.down(cluster_id)
         )
-
-        # Update status in database
-        repository = await _get_repository()
-        await repository.update_status(
-            job_id=cluster_id,
-            status=JobStatus.TERMINATED,
-            metadata_updates={"stopped_at": datetime.now(UTC).isoformat()} if download_results else {}
-        )
-
-        # Remove from active clusters (still in DB for history)
-        if cluster_id in ACTIVE_CLUSTERS:
-            del ACTIVE_CLUSTERS[cluster_id]
 
         return {
             "status": "stopped",
@@ -414,40 +411,48 @@ async def list_active_training_jobs() -> Dict[str, Any]:
     Returns:
         Dict with list of active training clusters
     """
-    repository = await _get_repository()
+    try:
+        # Get all clusters from SkyPilot
+        loop = asyncio.get_event_loop()
+        all_clusters = await loop.run_in_executor(
+            None,
+            lambda: sky.status(refresh=True)
+        )
 
-    # Get active jobs from database (authoritative source)
-    active_jobs = await repository.list_active()
+        if not all_clusters:
+            return {
+                "active_jobs": [],
+                "count": 0,
+                "message": "No active training jobs",
+            }
 
-    # Sync ACTIVE_CLUSTERS with database
-    ACTIVE_CLUSTERS.clear()
-    for job in active_jobs:
-        ACTIVE_CLUSTERS[job.job_id] = job
+        # Filter for VibeML clusters (start with "vibeml-")
+        # and are in active states (INIT, UP)
+        vibeml_clusters = [
+            c for c in all_clusters
+            if c.name.startswith("vibeml-") and str(c.status) in ["INIT", "UP"]
+        ]
 
-    if not active_jobs:
+        jobs = []
+        for cluster in vibeml_clusters:
+            jobs.append({
+                "cluster_id": cluster.name,
+                "status": _map_sky_status_to_job_status(str(cluster.status)).value,
+                "sky_status": str(cluster.status),
+                "launched_at": cluster.launched_at.isoformat() if cluster.launched_at else None,
+            })
+
         return {
-            "active_jobs": [],
-            "count": 0,
-            "message": "No active training jobs",
+            "active_jobs": jobs,
+            "count": len(jobs),
+            "message": f"Found {len(jobs)} active training job(s)",
         }
 
-    jobs = []
-    for job_handle in active_jobs:
-        jobs.append({
-            "cluster_id": job_handle.job_id,
-            "workflow": job_handle.workflow,
-            "model": job_handle.model,
-            "dataset": job_handle.dataset,
-            "gpu_type": job_handle.gpu_type,
-            "status": job_handle.status.value,
-            "created_at": job_handle.created_at.isoformat(),
-        })
-
-    return {
-        "active_jobs": jobs,
-        "count": len(jobs),
-        "message": f"Found {len(jobs)} active training job(s)",
-    }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to list jobs: {str(e)}",
+        }
 
 
 def run_server():
@@ -457,6 +462,7 @@ def run_server():
 
     print("Starting VibeML MCP Server...")
     print(f"Available workflows: {', '.join(WORKFLOWS.keys())}")
+    print("Note: Job state is managed by SkyPilot (~/.sky/state.json)")
 
     # Run the server
     asyncio.run(run_stdio(mcp))

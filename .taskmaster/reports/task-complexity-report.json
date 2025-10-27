@@ -1,8 +1,8 @@
 {
 	"meta": {
-		"generatedAt": "2025-10-26T23:34:30.382Z",
+		"generatedAt": "2025-10-26T23:57:54.583Z",
 		"tasksAnalyzed": 1,
-		"totalTasks": 16,
+		"totalTasks": 17,
 		"analysisCount": 1,
 		"thresholdScore": 5,
 		"projectName": "Taskmaster",
@@ -10,12 +10,12 @@
 	},
 	"complexityAnalysis": [
 		{
-			"taskId": 16,
-			"taskTitle": "Implement Durable Job Persistence Layer",
-			"complexityScore": 7,
-			"recommendedSubtasks": 5,
-			"expansionPrompt": "Decompose the persistence layer work: include designing the SQLite-backed repository and schema, wiring repository lifecycle into server startup/shutdown, refactoring job launch/status/stop paths to persist state, handling metadata serialization & async safety, and adding focused unit/integration tests.",
-			"reasoning": "Requires introducing a new SQLite persistence module, integrating it with existing FastMCP server lifecycle, refactoring multiple job management paths to replace in-memory dict access, solving metadata serialization and async blocking concerns, adding defensive error handling, and building both repository-level and async server tests; moderate architectural change with non-trivial testing."
+			"taskId": 17,
+			"taskTitle": "Re-architect MCP Layer Around Native SkyPilot State",
+			"complexityScore": 8,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Break this work into subtasks that cover rewriting the architecture docs around the SkyPilot-backed MCP design, removing the persistence package/tests and cleaning imports, refactoring server tools to source job state via sky.status/sky.jobs and the SkyPilot state file, updating JobHandle modelling/mapping for SkyPilot data, refreshing user docs that reference the old job tracker, and adding async tests that monkeypatch SkyPilot APIs.",
+			"reasoning": "The current MCP server is tightly coupled to the SQLite persistence layer—see the global repository logic and ACTIVE_CLUSTERS usage in src/vibeml/server.py:23-118, 200-282—so shifting to native SkyPilot state requires reworking every lifecycle entry point plus new helpers to map SkyPilot statuses to JobStatus while handling ~/.sky/state.json fallbacks. JobHandle in src/vibeml/models.py:68-109 assumes DB-backed metadata, so it must be reshaped to consume sky.status/sky.jobs outputs. Removing persistence means deleting src/vibeml/persistence/* and rewriting associated imports/tests (tests/test_persistence.py:1-160), alongside creating new async tests that monkeypatch sky.launch/status/down behaviours to cover the new integration. Documentation updates span multiple navigation entries (mkdocs.yml:53-114) and currently empty stubs like docs/concepts/architecture.md and docs/how-to/use-mcp.md, which need substantive content on the SkyPilot contract. Overall this is a broad refactor with coordination across code, tests, and docs, but it leverages existing FastMCP structure and SkyPilot APIs, keeping complexity high yet manageable."
 		}
 	]
 }
