@@ -329,5 +329,5 @@ except PydanticValidationError as e:
 
 - [SkyPilot Documentation](https://skypilot.readthedocs.io/)
 - [FastMCP Documentation](https://github.com/jlowin/fastmcp)
-- [Model Context Protocol Spec](https://spec.modelcontextprotocol.io/)
+- [Model Context Protocol Spec](https://modelcontextprotocol.io/specification)
 - [Nebius Cloud Documentation](https://nebius.com/docs/)
