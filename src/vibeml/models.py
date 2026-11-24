@@ -2,9 +2,9 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class JobStatus(str, Enum):
@@ -45,9 +45,7 @@ class CostEstimate(BaseModel):
         """Validate that expected_cost is between min and max."""
         if "min_cost" in info.data and "max_cost" in info.data:
             if not (info.data["min_cost"] <= v <= info.data["max_cost"]):
-                raise ValueError(
-                    "expected_cost must be between min_cost and max_cost"
-                )
+                raise ValueError("expected_cost must be between min_cost and max_cost")
         return v
 
 
@@ -89,17 +87,15 @@ class TrainingRequest(BaseModel):
 
     model: str = Field(min_length=1, description="HuggingFace model ID or size")
     dataset: str = Field(min_length=1, description="HuggingFace dataset ID")
-    workflow: str = Field(
-        default="unsloth", description="Training workflow type"
-    )
-    gpu_type: Optional[str] = Field(
+    workflow: str = Field(default="unsloth", description="Training workflow type")
+    gpu_type: str | None = Field(
         default=None, description="GPU type (auto-selected if not specified)"
     )
     cloud: str = Field(default="nebius", description="Cloud provider")
-    max_cost: Optional[float] = Field(
+    max_cost: float | None = Field(
         default=None, ge=0, description="Maximum cost limit in USD"
     )
-    hyperparameters: Dict[str, Any] = Field(
+    hyperparameters: dict[str, Any] = Field(
         default_factory=dict, description="Additional hyperparameters"
     )
 
@@ -118,15 +114,13 @@ class TrainingRequest(BaseModel):
 
     @field_validator("gpu_type")
     @classmethod
-    def validate_gpu_type(cls, v: Optional[str]) -> Optional[str]:
+    def validate_gpu_type(cls, v: str | None) -> str | None:
         """Validate GPU type if specified."""
         if v is None:
             return v
         valid_gpus = {"L40S", "RTX4090", "H100", "A100"}
         if v not in valid_gpus:
-            raise ValueError(
-                f"GPU type must be one of {valid_gpus}, got '{v}'"
-            )
+            raise ValueError(f"GPU type must be one of {valid_gpus}, got '{v}'")
         return v
 
     @field_validator("workflow")
@@ -135,9 +129,7 @@ class TrainingRequest(BaseModel):
         """Validate workflow type."""
         valid_workflows = {"unsloth", "gpt-oss-lora", "gpt-oss-full"}
         if v not in valid_workflows:
-            raise ValueError(
-                f"Workflow must be one of {valid_workflows}, got '{v}'"
-            )
+            raise ValueError(f"Workflow must be one of {valid_workflows}, got '{v}'")
         return v
 
     @field_validator("cloud")
@@ -146,9 +138,7 @@ class TrainingRequest(BaseModel):
         """Validate cloud provider."""
         valid_clouds = {"nebius", "aws", "gcp", "azure"}
         if v not in valid_clouds:
-            raise ValueError(
-                f"Cloud must be one of {valid_clouds}, got '{v}'"
-            )
+            raise ValueError(f"Cloud must be one of {valid_clouds}, got '{v}'")
         return v
 
 
@@ -158,17 +148,18 @@ class JobHandle(BaseModel):
     job_id: str = Field(min_length=1, description="Unique job identifier")
     cluster_name: str = Field(min_length=1, description="SkyPilot cluster name")
     status: JobStatus = Field(description="Current job status")
-    cost_estimate: Optional[CostEstimate] = Field(
+    cost_estimate: CostEstimate | None = Field(
         default=None, description="Cost estimation for the job"
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc), description="Job creation timestamp"
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Job creation timestamp",
     )
     model: str = Field(min_length=1, description="Model being trained")
     dataset: str = Field(min_length=1, description="Dataset being used")
     workflow: str = Field(min_length=1, description="Workflow type")
     gpu_type: str = Field(min_length=1, description="GPU type being used")
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional job metadata"
     )
 

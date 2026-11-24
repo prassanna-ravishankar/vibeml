@@ -6,11 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from vibeml.models import (
-    JobStatus,
     CostEstimate,
-    WorkflowMetadata,
-    TrainingRequest,
     JobHandle,
+    JobStatus,
+    TrainingRequest,
+    WorkflowMetadata,
 )
 
 

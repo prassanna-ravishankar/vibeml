@@ -1,10 +1,10 @@
 """Model validation using HuggingFace Hub."""
 
-from typing import Optional, Dict, Any
 import re
+from typing import Any, ClassVar
 
-from huggingface_hub import HfApi, hf_hub_url
-from huggingface_hub.utils import RepositoryNotFoundError, GatedRepoError
+from huggingface_hub import HfApi
+from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
 from ..exceptions import ModelNotFoundError, ValidationError
 
@@ -13,7 +13,7 @@ class ModelValidator:
     """Validates HuggingFace models and calculates requirements."""
 
     # Approximate memory requirements (GB) by model parameter size
-    MODEL_SIZE_MEMORY_MAP = {
+    MODEL_SIZE_MEMORY_MAP: ClassVar[dict[str, int]] = {
         "1b": 4,
         "3b": 8,
         "7b": 16,
@@ -28,7 +28,7 @@ class ModelValidator:
         """Initialize ModelValidator."""
         self.api = HfApi()
 
-    def validate_model(self, model_id: str) -> Dict[str, Any]:
+    def validate_model(self, model_id: str) -> dict[str, Any]:
         """Validate that a model exists and is accessible.
 
         Args:
@@ -67,20 +67,20 @@ class ModelValidator:
             raise ModelNotFoundError(
                 f"Model '{model_id}' not found on HuggingFace Hub",
                 model_id=model_id,
-            )
+            ) from None
         except GatedRepoError:
             raise ModelNotFoundError(
                 f"Model '{model_id}' is gated and requires access approval",
                 model_id=model_id,
                 recovery_suggestion="Request access on HuggingFace Hub and configure your HF token",
-            )
+            ) from None
         except Exception as e:
             raise ValidationError(
                 f"Failed to validate model '{model_id}'",
                 technical_details=str(e),
-            )
+            ) from e
 
-    def _estimate_model_size(self, model_id: str) -> Optional[str]:
+    def _estimate_model_size(self, model_id: str) -> str | None:
         """Estimate model size from model ID.
 
         Args:

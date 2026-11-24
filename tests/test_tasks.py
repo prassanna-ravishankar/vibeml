@@ -2,15 +2,16 @@
 
 import pytest
 import sky
+
+from vibeml.exceptions import ValidationError
 from vibeml.tasks import (
-    build_task,
-    create_unsloth_task,
-    create_gpt_oss_lora_task,
-    create_gpt_oss_full_task,
-    get_workflow,
     WORKFLOWS,
+    build_task,
+    create_gpt_oss_full_task,
+    create_gpt_oss_lora_task,
+    create_unsloth_task,
+    get_workflow,
 )
-from vibeml.exceptions import ValidationError, TaskGenerationError
 
 
 def _resources(task: sky.Task) -> sky.Resources:
@@ -143,7 +144,9 @@ class TestGPTOSSFullTask:
         assert "vibeml-gpt-oss-full-20b" in task.name
         assert str(_resources(task).cloud) == "nebius"
         assert _resources(task).accelerators == {"H100": 8}
-        assert _resources(task).use_spot is False  # Full training needs stable instances
+        assert (
+            _resources(task).use_spot is False
+        )  # Full training needs stable instances
         assert task.num_nodes == 1
 
     def test_create_gpt_oss_full_120b(self):
@@ -185,12 +188,15 @@ class TestWorkflowRegistry:
         assert "gpt-oss-full" in WORKFLOWS
         assert len(WORKFLOWS) == 3
 
+
 class TestBuildTask:
     """build_task maps tool-level parameters onto a workflow's arguments."""
 
     def test_unsloth_defaults_to_l40s(self) -> None:
         """Without a GPU type, Unsloth uses the cost-effective L40S."""
-        task = build_task("unsloth", model="mistralai/Mistral-7B-v0.1", dataset="tatsu-lab/alpaca")
+        task = build_task(
+            "unsloth", model="mistralai/Mistral-7B-v0.1", dataset="tatsu-lab/alpaca"
+        )
 
         assert _resources(task).accelerators == {"L40S": 1}
 

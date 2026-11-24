@@ -1,10 +1,9 @@
 """Budget management and cost tracking."""
 
 import json
-from pathlib import Path
-from typing import Optional, Dict, List
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -33,7 +32,7 @@ class BudgetStatus(str, Enum):
 class BudgetManager:
     """Manages budget limits, tracking, and alerts."""
 
-    def __init__(self, config_dir: Optional[Path] = None) -> None:
+    def __init__(self, config_dir: Path | None = None) -> None:
         """Initialize BudgetManager.
 
         Args:
@@ -43,7 +42,7 @@ class BudgetManager:
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
         self.spending_file = self.config_dir / "spending.json"
-        self._spending_records: List[SpendingRecord] = []
+        self._spending_records: list[SpendingRecord] = []
         self._load_spending()
 
     def _load_spending(self) -> None:
@@ -65,7 +64,9 @@ class BudgetManager:
         """Save spending records to file."""
         try:
             data = {
-                "records": [record.model_dump(mode="json") for record in self._spending_records],
+                "records": [
+                    record.model_dump(mode="json") for record in self._spending_records
+                ],
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             }
             self.spending_file.write_text(json.dumps(data, indent=2))
@@ -73,7 +74,7 @@ class BudgetManager:
             raise ConfigurationError(
                 "Failed to save spending records",
                 technical_details=str(e),
-            )
+            ) from e
 
     def record_spending(
         self,
@@ -105,7 +106,7 @@ class BudgetManager:
 
     def get_total_spending(
         self,
-        since: Optional[datetime] = None,
+        since: datetime | None = None,
     ) -> float:
         """Get total spending amount.
 
@@ -121,7 +122,7 @@ class BudgetManager:
                 total += record.amount
         return total
 
-    def get_spending_by_workflow(self) -> Dict[str, float]:
+    def get_spending_by_workflow(self) -> dict[str, float]:
         """Get spending broken down by workflow type.
 
         Returns:
@@ -133,7 +134,7 @@ class BudgetManager:
             spending[workflow] = spending.get(workflow, 0.0) + record.amount
         return spending
 
-    def get_spending_by_gpu(self) -> Dict[str, float]:
+    def get_spending_by_gpu(self) -> dict[str, float]:
         """Get spending broken down by GPU type.
 
         Returns:
@@ -148,7 +149,7 @@ class BudgetManager:
     def check_budget(
         self,
         estimated_cost: float,
-        max_cost: Optional[float] = None,
+        max_cost: float | None = None,
         warning_threshold: float = 0.8,
     ) -> BudgetStatus:
         """Check if a job is within budget.
@@ -182,7 +183,7 @@ class BudgetManager:
     def require_approval(
         self,
         estimated_cost: float,
-        max_cost: Optional[float] = None,
+        max_cost: float | None = None,
         auto_approve_threshold: float = 10.0,
     ) -> bool:
         """Check if a job requires manual approval.
@@ -210,8 +211,8 @@ class BudgetManager:
 
     def get_spending_summary(
         self,
-        since: Optional[datetime] = None,
-    ) -> Dict[str, any]:
+        since: datetime | None = None,
+    ) -> dict[str, any]:
         """Get spending summary with breakdown.
 
         Args:
@@ -243,7 +244,9 @@ class BudgetManager:
             output_file: Path to output file
         """
         data = {
-            "records": [record.model_dump(mode="json") for record in self._spending_records],
+            "records": [
+                record.model_dump(mode="json") for record in self._spending_records
+            ],
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "summary": self.get_spending_summary(),
         }

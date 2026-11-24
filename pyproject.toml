@@ -41,7 +41,6 @@ dev = [
 ]
 lint = [
   "ruff >=0.5.5",
-  "pydoclint >=0.5.0",
 ]
 docs = [
   "mkdocs >=1.5.0",
@@ -126,12 +125,13 @@ select = [
 ignore = [
   "COM812",
   "COM819",
-  "D107",  # undocumented-public-init conflicts with DOC301
+  "D107",  # __init__ is documented in the class docstring
   "D206",
   "D300",
   "E111",
   "E114",
   "E117",
+  "E501",  # line length is ruff-format's job
   "ISC001",
   "ISC002",
   "Q000",
@@ -148,8 +148,3 @@ ignore = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.pydoclint]
-style = 'google'
-exclude = '\.git|\.nox|noxfile.py'
-arg-type-hints-in-docstring = false

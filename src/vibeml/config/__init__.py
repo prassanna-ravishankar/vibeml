@@ -1,7 +1,7 @@
 """Configuration management for VibeML."""
 
+from .budget import BudgetManager
 from .credentials import CredentialManager
 from .preferences import PreferencesManager
-from .budget import BudgetManager
 
-__all__ = ["CredentialManager", "PreferencesManager", "BudgetManager"]
+__all__ = ["BudgetManager", "CredentialManager", "PreferencesManager"]

@@ -1,7 +1,7 @@
 """Cost estimation for cloud training jobs."""
 
-from typing import Dict, Optional
 from dataclasses import dataclass
+from typing import ClassVar
 
 from ..models import CostEstimate
 
@@ -18,7 +18,7 @@ class CostEstimator:
     """Estimates costs for training jobs."""
 
     # Nebius GPU pricing ($/hour, on-demand)
-    NEBIUS_PRICING = {
+    NEBIUS_PRICING: ClassVar[dict[str, GPUPricing]] = {
         "RTX4090": GPUPricing(hourly_rate=0.8),
         "L40S": GPUPricing(hourly_rate=1.2),
         "A100": GPUPricing(hourly_rate=2.4),
@@ -120,9 +120,7 @@ class CostEstimator:
             GPUPricing object
         """
         if cloud == "nebius":
-            return self.NEBIUS_PRICING.get(
-                gpu_type, GPUPricing(hourly_rate=2.0)
-            )
+            return self.NEBIUS_PRICING.get(gpu_type, GPUPricing(hourly_rate=2.0))
 
         # Default pricing for other clouds
         return GPUPricing(hourly_rate=2.0)

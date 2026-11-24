@@ -1,9 +1,8 @@
 """Secure credential storage and management."""
 
+import json
 import os
 from pathlib import Path
-from typing import Optional, Dict
-import json
 
 from cryptography.fernet import Fernet
 
@@ -13,7 +12,7 @@ from ..exceptions import ConfigurationError
 class CredentialManager:
     """Manages encrypted storage and retrieval of cloud credentials."""
 
-    def __init__(self, config_dir: Optional[Path] = None) -> None:
+    def __init__(self, config_dir: Path | None = None) -> None:
         """Initialize CredentialManager.
 
         Args:
@@ -77,14 +76,14 @@ class CredentialManager:
             raise ConfigurationError(
                 f"Failed to store credential for {provider}",
                 technical_details=str(e),
-            )
+            ) from e
 
     def get_credential(
         self,
         provider: str,
         credential_type: str,
-        fallback_env: Optional[str] = None,
-    ) -> Optional[str]:
+        fallback_env: str | None = None,
+    ) -> str | None:
         """Retrieve a credential.
 
         Args:
@@ -108,7 +107,7 @@ class CredentialManager:
     def delete_credential(
         self,
         provider: str,
-        credential_type: Optional[str] = None,
+        credential_type: str | None = None,
     ) -> None:
         """Delete a credential or all credentials for a provider.
 
@@ -137,7 +136,7 @@ class CredentialManager:
         credentials = self._load_credentials()
         return list(credentials.keys())
 
-    def validate_credentials(self, provider: str) -> Dict[str, bool]:
+    def validate_credentials(self, provider: str) -> dict[str, bool]:
         """Validate credentials for a provider.
 
         Args:
@@ -156,7 +155,7 @@ class CredentialManager:
 
         return validation
 
-    def _load_credentials(self) -> Dict[str, Dict[str, str]]:
+    def _load_credentials(self) -> dict[str, dict[str, str]]:
         """Load and decrypt credentials from file.
 
         Returns:
@@ -175,9 +174,9 @@ class CredentialManager:
                 "Failed to load credentials",
                 technical_details=str(e),
                 recovery_suggestion="Credentials file may be corrupted. Consider resetting credentials.",
-            )
+            ) from e
 
-    def _save_credentials(self, credentials: Dict[str, Dict[str, str]]) -> None:
+    def _save_credentials(self, credentials: dict[str, dict[str, str]]) -> None:
         """Encrypt and save credentials to file.
 
         Args:
@@ -193,7 +192,7 @@ class CredentialManager:
             raise ConfigurationError(
                 "Failed to save credentials",
                 technical_details=str(e),
-            )
+            ) from e
 
     def reset(self) -> None:
         """Reset all credentials and encryption keys."""

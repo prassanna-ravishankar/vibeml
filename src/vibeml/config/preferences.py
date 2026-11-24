@@ -1,9 +1,9 @@
 """User preferences management."""
 
 import json
-from pathlib import Path
-from typing import Optional, Any, Dict
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -15,11 +15,13 @@ class UserPreferences(BaseModel):
 
     default_gpu_type: str = Field(default="L40S", description="Default GPU type")
     default_cloud: str = Field(default="nebius", description="Default cloud provider")
-    default_region: Optional[str] = Field(
+    default_region: str | None = Field(
         default=None, description="Default region (auto-selected if None)"
     )
-    default_workflow: str = Field(default="unsloth", description="Default workflow type")
-    max_budget_per_job: Optional[float] = Field(
+    default_workflow: str = Field(
+        default="unsloth", description="Default workflow type"
+    )
+    max_budget_per_job: float | None = Field(
         default=None, ge=0, description="Maximum budget per job in USD"
     )
     use_spot_instances: bool = Field(
@@ -71,7 +73,7 @@ class PreferencesManager:
 
     CONFIG_VERSION = "1.0"
 
-    def __init__(self, config_dir: Optional[Path] = None) -> None:
+    def __init__(self, config_dir: Path | None = None) -> None:
         """Initialize PreferencesManager.
 
         Args:
@@ -81,7 +83,7 @@ class PreferencesManager:
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
         self.config_file = self.config_dir / "config.json"
-        self._preferences: Optional[UserPreferences] = None
+        self._preferences: UserPreferences | None = None
 
     def load(self) -> UserPreferences:
         """Load user preferences from file.
@@ -110,7 +112,9 @@ class PreferencesManager:
                 data = self._migrate_config(data, file_version)
 
             # Extract preferences (skip metadata)
-            prefs_data = {k: v for k, v in data.items() if k not in ["version", "last_updated"]}
+            prefs_data = {
+                k: v for k, v in data.items() if k not in ["version", "last_updated"]
+            }
             self._preferences = UserPreferences(**prefs_data)
             return self._preferences
 
@@ -119,7 +123,7 @@ class PreferencesManager:
                 "Failed to load preferences",
                 technical_details=str(e),
                 recovery_suggestion="Check config file at ~/.vibeml/config.json or reset preferences",
-            )
+            ) from e
 
     def save(self) -> None:
         """Save user preferences to file.
@@ -141,7 +145,7 @@ class PreferencesManager:
             raise ConfigurationError(
                 "Failed to save preferences",
                 technical_details=str(e),
-            )
+            ) from e
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a specific preference value.
@@ -185,14 +189,14 @@ class PreferencesManager:
                 f"Invalid value for preference {key}",
                 technical_details=str(e),
                 config_key=key,
-            )
+            ) from e
 
     def reset(self) -> None:
         """Reset preferences to defaults."""
         self._preferences = UserPreferences()
         self.save()
 
-    def get_all(self) -> Dict[str, Any]:
+    def get_all(self) -> dict[str, Any]:
         """Get all preferences as a dictionary.
 
         Returns:
@@ -201,7 +205,9 @@ class PreferencesManager:
         prefs = self.load()
         return prefs.model_dump()
 
-    def _migrate_config(self, data: Dict[str, Any], from_version: str) -> Dict[str, Any]:
+    def _migrate_config(
+        self, data: dict[str, Any], from_version: str
+    ) -> dict[str, Any]:
         """Migrate configuration from old version to current.
 
         Args:

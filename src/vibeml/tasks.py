@@ -1,7 +1,10 @@
 """Task generation functions for different training workflows."""
 
-from typing import Dict, Optional, Callable, Any
+from collections.abc import Callable
+from typing import Any
+
 import sky
+
 from .exceptions import TaskGenerationError, ValidationError
 
 
@@ -14,7 +17,7 @@ def create_unsloth_task(
     max_steps: int = 60,
     learning_rate: float = 2e-4,
     output_dir: str = "./outputs",
-    cloud_bucket: Optional[str] = None,
+    cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for Unsloth fine-tuning on Nebius.
 
@@ -40,7 +43,9 @@ def create_unsloth_task(
     """
     # Validate inputs
     if not model or "/" not in model:
-        raise ValidationError(f"Invalid model format: {model}. Expected format: 'org/model'")
+        raise ValidationError(
+            f"Invalid model format: {model}. Expected format: 'org/model'"
+        )
 
     if not dataset:
         raise ValidationError("Dataset cannot be empty")
@@ -54,7 +59,9 @@ def create_unsloth_task(
     }
 
     if gpu_type not in gpu_configs:
-        raise ValidationError(f"Unsupported GPU type: {gpu_type}. Choose from {list(gpu_configs.keys())}")
+        raise ValidationError(
+            f"Unsupported GPU type: {gpu_type}. Choose from {list(gpu_configs.keys())}"
+        )
 
     config = gpu_configs[gpu_type]
 
@@ -164,14 +171,14 @@ print('Training complete!')
         return task
 
     except Exception as e:
-        raise TaskGenerationError(f"Failed to create Unsloth task: {str(e)}")
+        raise TaskGenerationError(f"Failed to create Unsloth task: {e!s}") from e
 
 
 def create_gpt_oss_lora_task(
     model_size: str = "20b",
     dataset: str = "tatsu-lab/alpaca",
     output_dir: str = "./outputs",
-    cloud_bucket: Optional[str] = None,
+    cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for GPT-OSS LoRA fine-tuning on Nebius.
 
@@ -205,7 +212,9 @@ def create_gpt_oss_lora_task(
     }
 
     if model_size not in model_configs:
-        raise ValidationError(f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}")
+        raise ValidationError(
+            f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}"
+        )
 
     config = model_configs[model_size]
 
@@ -309,14 +318,14 @@ print('Training complete!')
         return task
 
     except Exception as e:
-        raise TaskGenerationError(f"Failed to create GPT-OSS LoRA task: {str(e)}")
+        raise TaskGenerationError(f"Failed to create GPT-OSS LoRA task: {e!s}") from e
 
 
 def create_gpt_oss_full_task(
     model_size: str = "20b",
     dataset: str = "tatsu-lab/alpaca",
     output_dir: str = "./outputs",
-    cloud_bucket: Optional[str] = None,
+    cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for GPT-OSS full fine-tuning on Nebius.
 
@@ -350,7 +359,9 @@ def create_gpt_oss_full_task(
     }
 
     if model_size not in model_configs:
-        raise ValidationError(f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}")
+        raise ValidationError(
+            f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}"
+        )
 
     config = model_configs[model_size]
 
@@ -388,11 +399,11 @@ echo "Would require DeepSpeed/FSDP configuration for production use"
         return task
 
     except Exception as e:
-        raise TaskGenerationError(f"Failed to create GPT-OSS full task: {str(e)}")
+        raise TaskGenerationError(f"Failed to create GPT-OSS full task: {e!s}") from e
 
 
 # Workflow registry
-WORKFLOWS: Dict[str, Callable[..., sky.Task]] = {
+WORKFLOWS: dict[str, Callable[..., sky.Task]] = {
     "unsloth": create_unsloth_task,
     "gpt-oss-lora": create_gpt_oss_lora_task,
     "gpt-oss-full": create_gpt_oss_full_task,
@@ -416,11 +427,12 @@ def get_workflow(workflow_type: str) -> Callable[..., sky.Task]:
         raise ValueError(f"Unknown workflow: {workflow_type}. Available: {available}")
     return WORKFLOWS[workflow_type]
 
+
 def build_task(
     workflow: str,
     model: str,
     dataset: str,
-    gpu_type: Optional[str] = None,
+    gpu_type: str | None = None,
     **hyperparameters: Any,
 ) -> sky.Task:
     """Build the SkyPilot task for a workflow from tool-level parameters.
@@ -446,6 +458,8 @@ def build_task(
 
     given = {k: v for k, v in hyperparameters.items() if v is not None}
     if workflow == "unsloth":
-        return create(model=model, dataset=dataset, gpu_type=gpu_type or "L40S", **given)
+        return create(
+            model=model, dataset=dataset, gpu_type=gpu_type or "L40S", **given
+        )
     output_dir = {"output_dir": given["output_dir"]} if "output_dir" in given else {}
     return create(model_size=model, dataset=dataset, **output_dir)
