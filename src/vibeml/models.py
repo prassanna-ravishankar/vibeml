@@ -1,6 +1,6 @@
 """Pydantic models for VibeML data validation and type safety."""
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -162,7 +162,7 @@ class JobHandle(BaseModel):
         default=None, description="Cost estimation for the job"
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), description="Job creation timestamp"
+        default_factory=lambda: datetime.now(timezone.utc), description="Job creation timestamp"
     )
     model: str = Field(min_length=1, description="Model being trained")
     dataset: str = Field(min_length=1, description="Dataset being used")

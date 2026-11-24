@@ -22,7 +22,7 @@ for f in glob.glob('src/vibeml/*.c'): os.remove(f);
 nox.options.default_venv_backend = "uv"
 
 package = "vibeml"
-python_versions = ["3.12", "3.13", "3.11", "3.10", "3.9"]
+python_versions = ["3.12", "3.13", "3.11", "3.10"]
 nox.needs_version = ">= 2021.6.6"
 nox.options.sessions = (
     "pre-commit",
@@ -170,7 +170,7 @@ def tests(session: nox.Session) -> None:
         external=True,
     )
 
-    session.install("pytest", "coverage", "pytest-mock")
+    session.install("pytest", "coverage", "pytest-mock", "pytest-asyncio")
     session.install("-e", ".")
     session.run("pytest", *session.posargs)
 
@@ -220,7 +220,7 @@ def typeguard_tests(session: nox.Session) -> None:
         external=True,
     )
 
-    session.install("typeguard", "pytest", "pytest-mock")
+    session.install("typeguard", "pytest", "pytest-mock", "pytest-asyncio")
     session.install("-e", ".")
     session.run("pytest", "--typeguard-packages", package, *session.posargs)
 

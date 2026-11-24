@@ -12,6 +12,12 @@ from vibeml.tasks import (
 from vibeml.exceptions import ValidationError, TaskGenerationError
 
 
+def _resources(task: sky.Task) -> sky.Resources:
+    """Return the single Resources entry of a task."""
+    (resources,) = task.resources
+    return resources
+
+
 class TestUnslothTask:
     """Test Unsloth task generation."""
 
@@ -25,9 +31,9 @@ class TestUnslothTask:
 
         assert isinstance(task, sky.Task)
         assert "vibeml-unsloth" in task.name
-        assert task.resources.cloud == "nebius"
-        assert task.resources.accelerators == "L40S:1"
-        assert task.resources.use_spot is True
+        assert str(_resources(task).cloud) == "nebius"
+        assert _resources(task).accelerators == {"L40S": 1}
+        assert _resources(task).use_spot is True
 
     def test_create_unsloth_task_with_custom_params(self):
         """Test Unsloth task with custom parameters."""
@@ -40,7 +46,7 @@ class TestUnslothTask:
             lora_r=32,
         )
 
-        assert task.resources.accelerators == "H100:1"
+        assert _resources(task).accelerators == {"H100": 1}
         assert "max_steps=100" in task.run
         assert "learning_rate=0.0001" in task.run
         assert "r=32" in task.run
@@ -98,9 +104,9 @@ class TestGPTOSSLoRATask:
 
         assert isinstance(task, sky.Task)
         assert "vibeml-gpt-oss-lora-20b" in task.name
-        assert task.resources.cloud == "nebius"
-        assert task.resources.accelerators == "H100:2"
-        assert task.resources.disk_size == 200
+        assert str(_resources(task).cloud) == "nebius"
+        assert _resources(task).accelerators == {"H100": 2}
+        assert _resources(task).disk_size == 200
 
     def test_create_gpt_oss_lora_120b(self):
         """Test GPT-OSS LoRA task for 120B model."""
@@ -109,8 +115,8 @@ class TestGPTOSSLoRATask:
             dataset="tatsu-lab/alpaca",
         )
 
-        assert task.resources.accelerators == "H100:8"
-        assert task.resources.disk_size == 500
+        assert _resources(task).accelerators == {"H100": 8}
+        assert _resources(task).disk_size == 500
 
     def test_create_gpt_oss_lora_invalid_size(self):
         """Test GPT-OSS LoRA task with invalid model size."""
@@ -134,9 +140,9 @@ class TestGPTOSSFullTask:
 
         assert isinstance(task, sky.Task)
         assert "vibeml-gpt-oss-full-20b" in task.name
-        assert task.resources.cloud == "nebius"
-        assert task.resources.accelerators == "H100:8"
-        assert task.resources.use_spot is False  # Full training needs stable instances
+        assert str(_resources(task).cloud) == "nebius"
+        assert _resources(task).accelerators == {"H100": 8}
+        assert _resources(task).use_spot is False  # Full training needs stable instances
         assert task.num_nodes == 1
 
     def test_create_gpt_oss_full_120b(self):
@@ -146,8 +152,8 @@ class TestGPTOSSFullTask:
             dataset="tatsu-lab/alpaca",
         )
 
-        assert task.resources.accelerators == "H100:8"
-        assert task.resources.disk_size == 1000
+        assert _resources(task).accelerators == {"H100": 8}
+        assert _resources(task).disk_size == 1000
         assert task.num_nodes == 4  # Multi-node for 120B
 
 

@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 from typing import Optional, Dict, List
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -66,7 +66,7 @@ class BudgetManager:
         try:
             data = {
                 "records": [record.model_dump(mode="json") for record in self._spending_records],
-                "last_updated": datetime.now(UTC).isoformat(),
+                "last_updated": datetime.now(timezone.utc).isoformat(),
             }
             self.spending_file.write_text(json.dumps(data, indent=2))
         except Exception as e:
@@ -94,7 +94,7 @@ class BudgetManager:
         """
         record = SpendingRecord(
             job_id=job_id,
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
             amount=amount,
             description=description,
             workflow=workflow,
@@ -244,7 +244,7 @@ class BudgetManager:
         """
         data = {
             "records": [record.model_dump(mode="json") for record in self._spending_records],
-            "exported_at": datetime.now(UTC).isoformat(),
+            "exported_at": datetime.now(timezone.utc).isoformat(),
             "summary": self.get_spending_summary(),
         }
         output_file.write_text(json.dumps(data, indent=2))
