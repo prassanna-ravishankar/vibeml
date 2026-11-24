@@ -1,10 +1,13 @@
 """The stdio transport owns stdout, even when SkyPilot writes to it."""
 
 import json
+import queue
 import subprocess
 import sys
 import textwrap
-from typing import Any
+import threading
+import time
+from typing import IO, Any
 
 # Runs the real server with a fake SDK that writes to stdout the three ways
 # SkyPilot does: call-time print(), a logging handler bound to sys.stdout at
@@ -41,6 +44,20 @@ NOISY_SERVER = textwrap.dedent(
     server.run_server()
     """
 )
+
+
+TIMEOUT = 30
+
+
+def _lines_into(stream: IO[str], lines: "queue.Queue[str]") -> None:
+    """Forward every line of a stream into a queue."""
+    for line in stream:
+        lines.put(line)
+
+
+def _read_into(stream: IO[str], chunks: list[str]) -> None:
+    """Read a stream to EOF into a list."""
+    chunks.append(stream.read())
 
 
 def rpc(id_: int | None, method: str, params: dict[str, Any]) -> str:
@@ -80,22 +97,38 @@ def test_sdk_output_never_reaches_the_protocol_stream() -> None:
         stderr=subprocess.PIPE,
         text=True,
     )
+    assert (
+        proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    )
+    # Drain both pipes on threads so a stalled server fails at the deadline
+    # instead of hanging, and stderr can never back-pressure the server.
+    stdout_lines: queue.Queue[str] = queue.Queue()
+    stderr_chunks: list[str] = []
+    threading.Thread(
+        target=_lines_into, args=(proc.stdout, stdout_lines), daemon=True
+    ).start()
+    stderr_reader = threading.Thread(
+        target=_read_into, args=(proc.stderr, stderr_chunks), daemon=True
+    )
+    stderr_reader.start()
+
     responses: dict[int, Any] = {}
-    assert proc.stdin is not None and proc.stdout is not None
-    proc.stdin.write(requests)
-    proc.stdin.flush()
+    deadline = time.monotonic() + TIMEOUT
     try:
+        proc.stdin.write(requests)
+        proc.stdin.flush()
         while 2 not in responses:
-            line = proc.stdout.readline()
-            assert line, "server closed stdout before answering"
+            line = stdout_lines.get(timeout=max(deadline - time.monotonic(), 0))
             message = json.loads(line)  # fails if anything but JSON-RPC is on stdout
             if "id" in message:
                 responses[message["id"]] = message
-    finally:
         proc.stdin.close()
-        assert proc.stderr is not None
-        stderr = proc.stderr.read()
-        proc.wait(timeout=30)
+        proc.wait(timeout=TIMEOUT)
+    finally:
+        proc.kill()
+        proc.wait()
+    stderr_reader.join(timeout=TIMEOUT)
+    stderr = "".join(stderr_chunks)
 
     result = responses[2]["result"]["structuredContent"]
     assert result["status"] == "stopped"

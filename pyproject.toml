@@ -16,7 +16,7 @@ dependencies = [
     "click >=8.0.1",
     "nox",
     "skypilot[nebius]>=0.14",
-    "fastmcp>=0.1.0",
+    "fastmcp>=2.13",
     "pydantic>=2.0.0",
     "cryptography>=41.0.0",
     "huggingface-hub>=0.20.0",

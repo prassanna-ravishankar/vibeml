@@ -239,7 +239,7 @@ async def estimate_training_cost(
     model: str = "mistralai/Mistral-7B-v0.1",
     dataset: str = "tatsu-lab/alpaca",
     gpu_type: str | None = None,
-    estimated_hours: Annotated[float, Field(gt=0)] = 4.0,
+    estimated_hours: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 4.0,
 ) -> dict[str, Any]:
     """Estimate the cost of a training job before launching.
 
@@ -348,6 +348,10 @@ def run_server() -> None:
     streamed request logs and its logging handler targets ``sys.stdout``. So
     file descriptor 1 is pointed at stderr for the whole process, and the
     transport gets a private duplicate of the real stdout.
+
+    This takes over the process: stdout stays redirected and the middleware
+    stays registered until exit, so call it once, as the CLI does, and do not
+    embed it in a process that needs its own stdout.
     """
     logging.basicConfig(level=logging.INFO)
     console = sys.stdout

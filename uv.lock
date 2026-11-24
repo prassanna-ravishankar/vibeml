@@ -5075,7 +5075,7 @@ xdoctest = [
 requires-dist = [
     { name = "click", specifier = ">=8.0.1" },
     { name = "cryptography", specifier = ">=41.0.0" },
-    { name = "fastmcp", specifier = ">=0.1.0" },
+    { name = "fastmcp", specifier = ">=2.13" },
     { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "nox" },
