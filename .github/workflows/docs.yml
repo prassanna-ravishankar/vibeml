@@ -111,17 +111,19 @@ jobs:
           uv pip install --system -r docs/requirements.txt
           uv pip install --system -e .
 
+      # site_url puts the docs under /vibeml, so pages link to /vibeml/...;
+      # build into a matching layout so root-relative links resolve.
       - name: Build docs for link checking
         run: |
-          mkdocs build
+          mkdocs build -d _site/vibeml
 
       - name: Check links
         uses: lycheeverse/lychee-action@v2
         with:
           args: >-
             --verbose --no-progress
-            --root-dir ${{ github.workspace }}/site
+            --root-dir ${{ github.workspace }}/_site
             --exclude '^https://prassanna\.io/vibeml'
             --exclude '^https://console\.nebius\.com'
-            'site/**/*.html'
+            '_site/**/*.html'
           fail: true
