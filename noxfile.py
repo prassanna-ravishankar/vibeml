@@ -170,9 +170,9 @@ def tests(session: nox.Session) -> None:
         external=True,
     )
 
-    session.install("pytest", "coverage", "pytest-mock", "pytest-asyncio")
+    session.install("pytest", "coverage[toml]", "pytest-mock", "pytest-asyncio")
     session.install("-e", ".")
-    session.run("pytest", *session.posargs)
+    session.run("coverage", "run", "--parallel", "-m", "pytest", *session.posargs)
 
 
 @nox.session(python=python_versions[0])
@@ -189,17 +189,9 @@ def tests_compiled(session: nox.Session) -> None:
 
 @nox.session(python=python_versions[0])
 def coverage(session: nox.Session) -> None:
-    """Produce the coverage report."""
+    """Combine the coverage data from the test sessions and report on it."""
     args = session.posargs or ["report"]
-    session.install(
-        "pytest",
-        "coverage[toml]",
-        "pytest-cov",
-        "pytest-mock",
-    )
-    session.install("-e", ".")
-    session.log("Running pytest with coverage...")
-    session.run("pytest", "--cov=src", "--cov-report=xml")
+    session.install("coverage[toml]")
 
     if not session.posargs and any(Path().glob(".coverage.*")):
         session.run("coverage", "combine")

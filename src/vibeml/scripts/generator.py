@@ -127,5 +127,5 @@ if __name__ == "__main__":
             "output_dir": kwargs.get("output_dir", "./outputs"),
         }
 
-        template = Template(self.UNSLOTH_TEMPLATE)
-        return template.render(**params)
+        script: str = Template(self.UNSLOTH_TEMPLATE).render(**params)
+        return script

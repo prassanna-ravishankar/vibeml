@@ -168,7 +168,8 @@ class CredentialManager:
             cipher = self._get_cipher()
             encrypted_data = self.credentials_file.read_bytes()
             decrypted_data = cipher.decrypt(encrypted_data)
-            return json.loads(decrypted_data.decode())
+            credentials: dict[str, dict[str, str]] = json.loads(decrypted_data.decode())
+            return credentials
         except Exception as e:
             raise ConfigurationError(
                 "Failed to load credentials",

@@ -1,6 +1,6 @@
 """Tests for exception hierarchy and error handling."""
 
-import time
+from unittest.mock import patch
 
 import pytest
 
@@ -92,8 +92,8 @@ class TestBudgetExceededError:
     def test_budget_exceeded_basic(self) -> None:
         """Test basic budget exceeded error."""
         error = BudgetExceededError("Cost limit exceeded")
-        assert "Cost limit exceeded" in error.message
-        assert "max_cost" in error.recovery_suggestion
+        assert "Cost limit exceeded" in str(error.message)
+        assert "max_cost" in str(error.recovery_suggestion)
 
     def test_budget_exceeded_with_costs(self) -> None:
         """Test budget error with cost information."""
@@ -108,7 +108,7 @@ class TestBudgetExceededError:
     def test_budget_exceeded_default_suggestion(self) -> None:
         """Test default recovery suggestion."""
         error = BudgetExceededError("Budget exceeded")
-        assert "spot instances" in error.recovery_suggestion
+        assert "spot instances" in str(error.recovery_suggestion)
 
 
 class TestCloudProviderError:
@@ -136,8 +136,8 @@ class TestModelNotFoundError:
     def test_model_not_found_basic(self) -> None:
         """Test basic model not found error."""
         error = ModelNotFoundError("Model not found")
-        assert "Model not found" in error.message
-        assert "HuggingFace" in error.recovery_suggestion
+        assert "Model not found" in str(error.message)
+        assert "HuggingFace" in str(error.recovery_suggestion)
 
     def test_model_not_found_with_id(self) -> None:
         """Test model error with model ID."""
@@ -154,8 +154,8 @@ class TestDatasetError:
     def test_dataset_error_basic(self) -> None:
         """Test basic dataset error."""
         error = DatasetError("Dataset access failed")
-        assert "Dataset access failed" in error.message
-        assert "HuggingFace" in error.recovery_suggestion
+        assert "Dataset access failed" in str(error.message)
+        assert "HuggingFace" in str(error.recovery_suggestion)
 
     def test_dataset_error_with_id(self) -> None:
         """Test dataset error with dataset ID."""
@@ -208,26 +208,78 @@ class TestRetryWithBackoff:
             always_fails()
 
         error = exc_info.value
-        assert "failed after 2 retries" in error.message
-        assert "Permanent error" in error.technical_details
+        assert "failed after 2 retries" in str(error.message)
+        assert "Permanent error" in str(error.technical_details)
 
-    def test_exponential_backoff_timing(self) -> None:
-        """Test that backoff delays increase exponentially."""
-        call_times = []
+    def test_exponential_backoff_delays(self) -> None:
+        """Delays start at initial_delay and multiply by backoff_factor."""
+        calls = []
 
         @retry_with_backoff(max_retries=3, initial_delay=0.1, backoff_factor=2.0)
-        def track_timing() -> None:
-            call_times.append(time.time())
-            if len(call_times) < 4:
+        def flaky() -> str:
+            calls.append(1)
+            if len(calls) < 4:
                 raise ValueError("Retry")
+            return "ok"
 
-        track_timing()
+        with patch("vibeml.exceptions.time.sleep") as sleep:
+            assert flaky() == "ok"
 
-        # Check that delays roughly double (with some tolerance for timing)
-        delays = [call_times[i + 1] - call_times[i] for i in range(len(call_times) - 1)]
-        assert len(delays) == 3
-        # First delay ~0.1s, second ~0.2s, third ~0.4s
-        assert delays[0] < delays[1] < delays[2]
+        assert [c.args[0] for c in sleep.call_args_list] == pytest.approx(
+            [0.1, 0.2, 0.4]
+        )
+
+    def test_zero_retries_calls_once(self) -> None:
+        """max_retries=0 makes one attempt and wraps its failure."""
+        calls = []
+
+        @retry_with_backoff(max_retries=0)
+        def failing() -> None:
+            calls.append(1)
+            raise ValueError("boom")
+
+        with patch("vibeml.exceptions.time.sleep") as sleep:
+            with pytest.raises(SkyPilotError) as exc_info:
+                failing()
+
+        assert len(calls) == 1
+        sleep.assert_not_called()
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+    def test_exhaustion_chains_last_error(self) -> None:
+        """The final failure is the cause of the SkyPilotError."""
+        errors = iter([ValueError("first"), ValueError("second"), ValueError("last")])
+
+        @retry_with_backoff(max_retries=2)
+        def failing() -> None:
+            raise next(errors)
+
+        with patch("vibeml.exceptions.time.sleep"):
+            with pytest.raises(SkyPilotError) as exc_info:
+                failing()
+
+        assert str(exc_info.value.__cause__) == "last"
+
+    def test_uncaught_exceptions_are_not_retried(self) -> None:
+        """Exceptions outside ``exceptions`` propagate immediately, unwrapped."""
+        calls = []
+
+        @retry_with_backoff(max_retries=3, exceptions=(ValueError,))
+        def failing() -> None:
+            calls.append(1)
+            raise KeyError("not retryable")
+
+        with patch("vibeml.exceptions.time.sleep") as sleep:
+            with pytest.raises(KeyError):
+                failing()
+
+        assert len(calls) == 1
+        sleep.assert_not_called()
+
+    def test_negative_retries_rejected(self) -> None:
+        """A negative retry count is a programming error."""
+        with pytest.raises(ValueError, match="max_retries"):
+            retry_with_backoff(max_retries=-1)
 
 
 class TestErrorTranslator:
@@ -238,8 +290,8 @@ class TestErrorTranslator:
         error = Exception("No resource available in region")
         translated = ErrorTranslator.translate(error)
 
-        assert "GPU resources currently available" in translated.message
-        assert "different GPU type" in translated.recovery_suggestion
+        assert "GPU resources currently available" in str(translated.message)
+        assert "different GPU type" in str(translated.recovery_suggestion)
         assert translated.technical_details == "No resource available in region"
 
     def test_translate_quota_exceeded(self) -> None:
@@ -248,7 +300,7 @@ class TestErrorTranslator:
         translated = ErrorTranslator.translate(error)
 
         assert "quota limit reached" in translated.message.lower()
-        assert "increase quota" in translated.recovery_suggestion
+        assert "increase quota" in str(translated.recovery_suggestion)
 
     def test_translate_permission_denied(self) -> None:
         """Test translating permission error."""
@@ -256,7 +308,7 @@ class TestErrorTranslator:
         translated = ErrorTranslator.translate(error)
 
         assert "permissions" in translated.message.lower()
-        assert "credentials" in translated.recovery_suggestion
+        assert "credentials" in str(translated.recovery_suggestion)
 
     def test_translate_unknown_error(self) -> None:
         """Test translating unknown error."""
@@ -274,7 +326,7 @@ class TestErrorTranslator:
 
         assert isinstance(translated, SkyPilotError)
         assert "cluster not found" in translated.message.lower()
-        assert "terminated" in translated.recovery_suggestion
+        assert "terminated" in str(translated.recovery_suggestion)
 
     def test_translate_skypilot_launch_failed(self) -> None:
         """Test translating SkyPilot launch failed error."""
@@ -283,7 +335,7 @@ class TestErrorTranslator:
 
         assert isinstance(translated, SkyPilotError)
         assert "launch" in translated.message.lower()
-        assert "cloud provider" in translated.recovery_suggestion
+        assert "cloud provider" in str(translated.recovery_suggestion)
 
     def test_context_preservation(self) -> None:
         """Test that error context is preserved."""
