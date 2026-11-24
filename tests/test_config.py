@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, timezone, timedelta
 import tempfile
 import pytest
 

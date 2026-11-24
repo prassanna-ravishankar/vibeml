@@ -1,7 +1,7 @@
 """Tests for SkyPilot-backed MCP server functionality."""
 
 import pytest
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, AsyncMock, patch
 from typing import Any, Dict, List
 
@@ -27,7 +27,7 @@ class MockCluster:
     ):
         self.name = name
         self.status = status
-        self.launched_at = launched_at or datetime.now(UTC)
+        self.launched_at = launched_at or datetime.now(timezone.utc)
         self.resources = MagicMock(accelerators="L40S:1")
         self.handle = {"cloud": "nebius", "region": "eu-north1"}
 

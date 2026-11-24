@@ -15,7 +15,7 @@ classifiers = [
 dependencies = [
     "click >=8.0.1",
     "nox",
-    "skypilot[nebius]>=0.8.1",
+    "skypilot[nebius]>=0.14",
     "fastmcp>=0.1.0",
     "pydantic>=2.0.0",
     "cryptography>=41.0.0",
@@ -36,6 +36,7 @@ dev = [
   "pre-commit >=2.16.0",
   "pre-commit-hooks >=4.6.0",
   "pytest >=6.2.5",
+  "pytest-asyncio >=0.23",
   "pygments >=2.10.0",
 ]
 lint = [

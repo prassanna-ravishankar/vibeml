@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
