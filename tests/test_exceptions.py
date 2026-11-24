@@ -1,21 +1,20 @@
 """Tests for exception hierarchy and error handling."""
 
 import time
-from typing import Any
 
 import pytest
 
 from vibeml.exceptions import (
-    VibeMLError,
-    ConfigurationError,
     BudgetExceededError,
     CloudProviderError,
-    ModelNotFoundError,
+    ConfigurationError,
     DatasetError,
-    SkyPilotError,
-    retry_with_backoff,
     ErrorTranslator,
+    ModelNotFoundError,
+    SkyPilotError,
+    VibeMLError,
     get_region_fallbacks,
+    retry_with_backoff,
 )
 
 
@@ -200,6 +199,7 @@ class TestRetryWithBackoff:
 
     def test_permanent_failure(self) -> None:
         """Test that permanent failures raise SkyPilotError."""
+
         @retry_with_backoff(max_retries=2, initial_delay=0.01)
         def always_fails() -> None:
             raise ValueError("Permanent error")
@@ -224,7 +224,7 @@ class TestRetryWithBackoff:
         track_timing()
 
         # Check that delays roughly double (with some tolerance for timing)
-        delays = [call_times[i+1] - call_times[i] for i in range(len(call_times)-1)]
+        delays = [call_times[i + 1] - call_times[i] for i in range(len(call_times) - 1)]
         assert len(delays) == 3
         # First delay ~0.1s, second ~0.2s, third ~0.4s
         assert delays[0] < delays[1] < delays[2]

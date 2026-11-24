@@ -1,7 +1,7 @@
 """Resource validation and optimization."""
 
-from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from ..exceptions import ResourceError
 
@@ -14,7 +14,7 @@ class ResourceRequirements:
     recommended_gpu_memory: float  # GB
     min_disk_size: int  # GB
     recommended_disk_size: int  # GB
-    suitable_gpus: List[str]
+    suitable_gpus: list[str]
     preferred_gpu: str
     multi_gpu_required: bool = False
     min_gpu_count: int = 1
@@ -24,7 +24,7 @@ class ResourceValidator:
     """Validates and optimizes resource configurations."""
 
     # GPU specifications
-    GPU_SPECS = {
+    GPU_SPECS: ClassVar[dict[str, dict[str, Any]]] = {
         "RTX4090": {
             "memory_gb": 24,
             "cost_per_hour": 0.8,
@@ -102,7 +102,7 @@ class ResourceValidator:
 
     def _select_optimal_gpu(
         self,
-        suitable_gpus: List[str],
+        suitable_gpus: list[str],
         memory_required: float,
     ) -> str:
         """Select the most cost-effective GPU that meets requirements.
@@ -162,7 +162,7 @@ class ResourceValidator:
         if gpu_memory < memory_required:
             raise ResourceError(
                 f"{gpu_type} has {gpu_memory}GB memory, but {memory_required:.1f}GB required",
-                recovery_suggestion=f"Use a larger GPU or enable quantization",
+                recovery_suggestion="Use a larger GPU or enable quantization",
             )
 
         # Check for adequate headroom
@@ -177,8 +177,8 @@ class ResourceValidator:
     def optimize_spot_vs_ondemand(
         self,
         estimated_duration_hours: float,
-        max_cost: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        max_cost: float | None = None,
+    ) -> dict[str, Any]:
         """Recommend spot vs on-demand based on cost and duration.
 
         Args:

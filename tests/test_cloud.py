@@ -1,7 +1,5 @@
 """Tests for cloud integration."""
 
-import pytest
-
 from vibeml.cloud import CostEstimator
 from vibeml.models import CostEstimate
 

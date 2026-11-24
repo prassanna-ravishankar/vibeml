@@ -17,7 +17,9 @@ def server() -> None:
 
     # Stdout carries the MCP protocol; human-facing messages go to stderr.
     click.echo("Starting VibeML MCP Server...", err=True)
-    click.echo("Use this server with Claude or other MCP-compatible AI assistants", err=True)
+    click.echo(
+        "Use this server with Claude or other MCP-compatible AI assistants", err=True
+    )
     click.echo("Press Ctrl+C to stop the server", err=True)
 
     try:

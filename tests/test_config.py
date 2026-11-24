@@ -2,13 +2,12 @@
 
 import json
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
-import tempfile
+
 import pytest
 
-from vibeml.config import CredentialManager, PreferencesManager, BudgetManager
-from vibeml.config.budget import BudgetStatus, SpendingRecord
-from vibeml.exceptions import ConfigurationError, BudgetExceededError
+from vibeml.config import BudgetManager, CredentialManager, PreferencesManager
+from vibeml.config.budget import BudgetStatus
+from vibeml.exceptions import BudgetExceededError, ConfigurationError
 
 
 class TestCredentialManager:
@@ -42,7 +41,9 @@ class TestCredentialManager:
         assert cm.get_credential("aws", "access_key") == "aws-access"
         assert cm.get_credential("aws", "secret_key") == "aws-secret"
 
-    def test_fallback_to_environment(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fallback_to_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test fallback to environment variables."""
         monkeypatch.setenv("TEST_API_KEY", "env-value")
 

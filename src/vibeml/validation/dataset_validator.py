@@ -1,9 +1,9 @@
 """Dataset validation using HuggingFace Hub."""
 
-from typing import Dict, Any
+from typing import Any
 
 from huggingface_hub import HfApi
-from huggingface_hub.utils import RepositoryNotFoundError, GatedRepoError
+from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
 from ..exceptions import DatasetError, ValidationError
 
@@ -15,7 +15,7 @@ class DatasetValidator:
         """Initialize DatasetValidator."""
         self.api = HfApi()
 
-    def validate_dataset(self, dataset_id: str) -> Dict[str, Any]:
+    def validate_dataset(self, dataset_id: str) -> dict[str, Any]:
         """Validate that a dataset exists and is accessible.
 
         Args:
@@ -43,18 +43,18 @@ class DatasetValidator:
             raise DatasetError(
                 f"Dataset '{dataset_id}' not found on HuggingFace Hub",
                 dataset_id=dataset_id,
-            )
+            ) from None
         except GatedRepoError:
             raise DatasetError(
                 f"Dataset '{dataset_id}' is gated and requires access approval",
                 dataset_id=dataset_id,
                 recovery_suggestion="Request access on HuggingFace Hub and configure your HF token",
-            )
+            ) from None
         except Exception as e:
             raise ValidationError(
                 f"Failed to validate dataset '{dataset_id}'",
                 technical_details=str(e),
-            )
+            ) from e
 
     def estimate_dataset_size(self, dataset_id: str) -> float:
         """Estimate dataset size in GB.
@@ -66,7 +66,7 @@ class DatasetValidator:
             Estimated size in GB (default 10GB if unknown)
         """
         try:
-            dataset_info = self.api.dataset_info(dataset_id)
+            self.api.dataset_info(dataset_id)
             # Try to get size from dataset info
             # This is approximate as HF doesn't always provide exact sizes
             return 10.0  # Default conservative estimate

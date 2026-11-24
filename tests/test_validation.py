@@ -1,11 +1,12 @@
 """Tests for validation utilities."""
 
 import pytest
-from unittest.mock import Mock, patch
 
-from vibeml.validation import ModelValidator, DatasetValidator, ResourceValidator
+from vibeml.exceptions import (
+    ResourceError,
+)
+from vibeml.validation import DatasetValidator, ModelValidator, ResourceValidator
 from vibeml.validation.resource_validator import ResourceRequirements
-from vibeml.exceptions import ModelNotFoundError, DatasetError, ResourceError, ValidationError
 
 
 class TestModelValidator:

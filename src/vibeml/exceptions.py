@@ -1,8 +1,9 @@
 """Custom exception hierarchy for VibeML."""
 
 import time
-from typing import Optional, Any, Dict, List, Callable
+from collections.abc import Callable
 from functools import wraps
+from typing import Any, ClassVar
 
 
 class VibeMLError(Exception):
@@ -18,9 +19,9 @@ class VibeMLError(Exception):
     def __init__(
         self,
         message: str,
-        technical_details: Optional[str] = None,
-        recovery_suggestion: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
+        technical_details: str | None = None,
+        recovery_suggestion: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> None:
         """Initialize VibeMLError.
 
@@ -43,7 +44,7 @@ class VibeMLError(Exception):
             parts.append(f"\nSuggestion: {self.recovery_suggestion}")
         return "\n".join(parts)
 
-    def get_debug_info(self) -> Dict[str, Any]:
+    def get_debug_info(self) -> dict[str, Any]:
         """Get full debugging information.
 
         Returns:
@@ -94,8 +95,8 @@ class ConfigurationError(VibeMLError):
     def __init__(
         self,
         message: str,
-        config_key: Optional[str] = None,
-        expected_type: Optional[str] = None,
+        config_key: str | None = None,
+        expected_type: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize ConfigurationError.
@@ -120,8 +121,8 @@ class BudgetExceededError(VibeMLError):
     def __init__(
         self,
         message: str,
-        estimated_cost: Optional[float] = None,
-        max_cost: Optional[float] = None,
+        estimated_cost: float | None = None,
+        max_cost: float | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize BudgetExceededError.
@@ -140,9 +141,11 @@ class BudgetExceededError(VibeMLError):
 
         recovery_suggestion = kwargs.pop(
             "recovery_suggestion",
-            "Consider increasing max_cost, using spot instances, or choosing a smaller GPU type"
+            "Consider increasing max_cost, using spot instances, or choosing a smaller GPU type",
         )
-        super().__init__(message, recovery_suggestion=recovery_suggestion, context=context, **kwargs)
+        super().__init__(
+            message, recovery_suggestion=recovery_suggestion, context=context, **kwargs
+        )
 
 
 class CloudProviderError(VibeMLError):
@@ -151,8 +154,8 @@ class CloudProviderError(VibeMLError):
     def __init__(
         self,
         message: str,
-        cloud_provider: Optional[str] = None,
-        region: Optional[str] = None,
+        cloud_provider: str | None = None,
+        region: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize CloudProviderError.
@@ -177,7 +180,7 @@ class ModelNotFoundError(VibeMLError):
     def __init__(
         self,
         message: str,
-        model_id: Optional[str] = None,
+        model_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize ModelNotFoundError.
@@ -193,9 +196,11 @@ class ModelNotFoundError(VibeMLError):
 
         recovery_suggestion = kwargs.pop(
             "recovery_suggestion",
-            "Check the model ID on HuggingFace Hub or use a different model"
+            "Check the model ID on HuggingFace Hub or use a different model",
         )
-        super().__init__(message, recovery_suggestion=recovery_suggestion, context=context, **kwargs)
+        super().__init__(
+            message, recovery_suggestion=recovery_suggestion, context=context, **kwargs
+        )
 
 
 class DatasetError(VibeMLError):
@@ -204,7 +209,7 @@ class DatasetError(VibeMLError):
     def __init__(
         self,
         message: str,
-        dataset_id: Optional[str] = None,
+        dataset_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize DatasetError.
@@ -220,12 +225,15 @@ class DatasetError(VibeMLError):
 
         recovery_suggestion = kwargs.pop(
             "recovery_suggestion",
-            "Verify dataset exists on HuggingFace or check access permissions"
+            "Verify dataset exists on HuggingFace or check access permissions",
         )
-        super().__init__(message, recovery_suggestion=recovery_suggestion, context=context, **kwargs)
+        super().__init__(
+            message, recovery_suggestion=recovery_suggestion, context=context, **kwargs
+        )
 
 
 # Error Recovery Strategies
+
 
 def retry_with_backoff(
     max_retries: int = 3,
@@ -244,17 +252,16 @@ def retry_with_backoff(
     Returns:
         Decorated function with retry logic
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             delay = initial_delay
-            last_exception = None
 
             for attempt in range(max_retries + 1):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    last_exception = e
                     if attempt < max_retries:
                         time.sleep(delay)
                         delay *= backoff_factor
@@ -267,7 +274,9 @@ def retry_with_backoff(
                         ) from e
 
             return None  # Should never reach here
+
         return wrapper
+
     return decorator
 
 
@@ -275,7 +284,7 @@ class ErrorTranslator:
     """Translates technical errors into user-friendly messages."""
 
     # Common error patterns and their translations
-    ERROR_PATTERNS: Dict[str, Dict[str, str]] = {
+    ERROR_PATTERNS: ClassVar[dict[str, dict[str, str]]] = {
         "No resource available": {
             "message": "No GPU resources currently available in the selected region",
             "suggestion": "Try a different GPU type, region, or wait a few minutes and retry",
@@ -372,7 +381,7 @@ class ErrorTranslator:
         )
 
 
-def get_region_fallbacks(cloud: str, current_region: str) -> List[str]:
+def get_region_fallbacks(cloud: str, current_region: str) -> list[str]:
     """Get fallback regions for a cloud provider.
 
     Args:
@@ -382,13 +391,13 @@ def get_region_fallbacks(cloud: str, current_region: str) -> List[str]:
     Returns:
         List of alternative regions to try
     """
-    REGION_FALLBACKS = {
+    region_fallbacks = {
         "nebius": ["eu-north1", "eu-west1"],
         "aws": ["us-east-1", "us-west-2", "eu-west-1"],
         "gcp": ["us-central1", "us-east1", "europe-west1"],
         "azure": ["eastus", "westus2", "westeurope"],
     }
 
-    fallbacks = REGION_FALLBACKS.get(cloud, [])
+    fallbacks = region_fallbacks.get(cloud, [])
     # Remove current region from fallbacks
     return [r for r in fallbacks if r != current_region]
