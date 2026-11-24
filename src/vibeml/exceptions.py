@@ -254,7 +254,12 @@ def retry_with_backoff(
 
     Returns:
         Decorated function with retry logic
+
+    Raises:
+        ValueError: If max_retries is negative
     """
+    if max_retries < 0:
+        raise ValueError(f"max_retries must be >= 0, got {max_retries}")
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
