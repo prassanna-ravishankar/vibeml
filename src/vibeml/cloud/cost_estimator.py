@@ -1,7 +1,10 @@
 """Cost estimation for cloud training jobs."""
 
+import math
 from dataclasses import dataclass
 from typing import ClassVar
+
+import sky
 
 from ..models import CostEstimate
 
@@ -12,6 +15,16 @@ class GPUPricing:
 
     hourly_rate: float
     spot_discount: float = 0.7  # 30% of on-demand price
+
+
+@dataclass(frozen=True)
+class TaskCost:
+    """The priced resources of a task and its cost estimate."""
+
+    gpu_type: str
+    gpu_count: int
+    use_spot: bool
+    estimate: CostEstimate
 
 
 class CostEstimator:
@@ -108,6 +121,44 @@ class CostEstimator:
         estimated = base_duration * steps_factor * (0.5 + 0.5 * data_factor)
 
         return max(0.5, estimated)  # Minimum 30 minutes
+
+    def estimate_task(self, task: sky.Task, hours: float) -> TaskCost:
+        """Price exactly the resources a task requests.
+
+        Args:
+            task: Task with a single GPU resource request.
+            hours: Estimated runtime in hours.
+
+        Returns:
+            The priced resources and the cost estimate.
+        """
+        (resources,) = task.resources
+        ((gpu_type, per_node),) = resources.accelerators.items()
+        gpu_count = int(per_node) * task.num_nodes
+        return TaskCost(
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
+            use_spot=resources.use_spot,
+            estimate=self.estimate_cost(
+                gpu_type=gpu_type,
+                estimated_hours=hours,
+                gpu_count=gpu_count,
+                use_spot=resources.use_spot,
+            ),
+        )
+
+    def affordable_minutes(self, task: sky.Task, max_cost: float) -> int:
+        """Minutes of runtime a budget buys for a task, rounded down.
+
+        Args:
+            task: Task with a single GPU resource request.
+            max_cost: Budget in USD.
+
+        Returns:
+            Whole minutes the budget covers at the task's hourly rate.
+        """
+        hourly_rate = self.estimate_task(task, hours=1).estimate.hourly_rate
+        return math.floor(max_cost / hourly_rate * 60)
 
     def _get_pricing(self, gpu_type: str, cloud: str) -> GPUPricing:
         """Get pricing for GPU type and cloud.

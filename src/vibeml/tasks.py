@@ -10,6 +10,10 @@ from .exceptions import TaskGenerationError, ValidationError
 
 NEBIUS_INFRA = "nebius/eu-north1"
 
+# Where training writes checkpoints and final models, and where a cloud bucket
+# is mounted. One path for both, so outputs always land in the bucket.
+OUTPUTS_DIR = "/outputs"
+
 
 @dataclass(frozen=True)
 class Compute:
@@ -30,30 +34,55 @@ class ModelConfig:
 
 def _nebius_task(
     name: str,
-    setup: str,
+    install: str,
     run: str,
     compute: Compute,
     *,
     use_spot: bool,
+    output_dir: str,
     cloud_bucket: str | None,
+    envs: dict[str, str],
 ) -> sky.Task:
-    """Build a task on Nebius, mounting ``cloud_bucket`` at /outputs if given.
+    """Build a task on Nebius whose outputs go to ``output_dir``.
+
+    User-supplied values reach the scripts only as environment variables
+    (``envs`` plus ``VIBEML_OUTPUT_DIR``), which SkyPilot exports with shell
+    quoting, so they are never interpreted as code.
+
+    Dependency installs run at the start of ``run`` rather than in setup:
+    SkyPilot arms autostop (vibeml's cost cap) only after setup finishes, so
+    a slow or hanging install must happen under the armed timer.
+
+    With ``cloud_bucket``, the bucket is mounted at ``output_dir``, which is
+    where the run script writes. Without one, setup creates the directory if
+    it does not exist yet.
 
     Args:
         name: Task name.
-        setup: Setup script.
-        run: Run script.
+        install: Dependency installation commands.
+        run: Run script; writes outputs under ``$VIBEML_OUTPUT_DIR``.
         compute: GPU resources.
         use_spot: Whether to use spot instances.
-        cloud_bucket: Bucket to mount at /outputs, if any.
+        output_dir: Absolute path for outputs, and the bucket mount point.
+        cloud_bucket: Bucket to mount at ``output_dir``, if any.
+        envs: Other user-supplied values the scripts read.
 
     Returns:
         The configured task.
     """
+    setup = None
+    if not cloud_bucket:
+        setup = (
+            'if [ ! -e "$VIBEML_OUTPUT_DIR" ]; then\n'
+            '  sudo mkdir -p -- "$VIBEML_OUTPUT_DIR"\n'
+            '  sudo chown "$(id -u):$(id -g)" -- "$VIBEML_OUTPUT_DIR"\n'
+            "fi\n"
+        )
     task = sky.Task(
         name=name,
         setup=setup,
-        run=run,
+        run=install + run,
+        envs={**envs, "VIBEML_OUTPUT_DIR": output_dir},
         num_nodes=compute.num_nodes,
         resources=sky.Resources(
             infra=NEBIUS_INFRA,
@@ -64,9 +93,24 @@ def _nebius_task(
     )
     if cloud_bucket:
         task.set_storage_mounts(
-            {"/outputs": sky.Storage(name=cloud_bucket, mode=sky.StorageMode.MOUNT)}
+            {output_dir: sky.Storage(name=cloud_bucket, mode=sky.StorageMode.MOUNT)}
         )
     return task
+
+
+def _check_output_dir(output_dir: str) -> None:
+    """Require an absolute output directory, since it is also a mount point.
+
+    Args:
+        output_dir: Directory the run script writes outputs to.
+
+    Raises:
+        ValidationError: If the path is relative.
+    """
+    if not output_dir.startswith("/"):
+        raise ValidationError(
+            f"output_dir must be an absolute path (it is also the bucket mount point), got {output_dir!r}"
+        )
 
 
 def create_unsloth_task(
@@ -77,7 +121,7 @@ def create_unsloth_task(
     lora_r: int = 16,
     max_steps: int = 60,
     learning_rate: float = 2e-4,
-    output_dir: str = "./outputs",
+    output_dir: str = OUTPUTS_DIR,
     cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for Unsloth fine-tuning on Nebius.
@@ -92,7 +136,7 @@ def create_unsloth_task(
         lora_r: LoRA rank parameter
         max_steps: Maximum training steps
         learning_rate: Learning rate for training
-        output_dir: Directory for saving outputs
+        output_dir: Absolute directory for outputs; the bucket mount point
         cloud_bucket: Optional cloud bucket for checkpoints
 
     Returns:
@@ -103,6 +147,7 @@ def create_unsloth_task(
         TaskGenerationError: If task generation fails
     """
     # Validate inputs
+    _check_output_dir(output_dir)
     if not model or "/" not in model:
         raise ValidationError(
             f"Invalid model format: {model}. Expected format: 'org/model'"
@@ -127,7 +172,7 @@ def create_unsloth_task(
     compute = gpu_configs[gpu_type]
 
     # Setup script - installs Unsloth with correct CUDA version
-    setup_script = """
+    install_script = """
 # Detect CUDA version and install appropriate packages
 pip install --upgrade pip
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
@@ -138,15 +183,16 @@ pip install xformers trl peft accelerate bitsandbytes datasets transformers
     # Training script
     run_script = f"""
 python -c "
+import os
 import torch
 from unsloth import FastLanguageModel
 from trl import SFTTrainer
 from transformers import TrainingArguments
 from datasets import load_dataset
 
-print('Loading model: {model}')
+print('Loading model:', os.environ['VIBEML_MODEL'])
 model, tokenizer = FastLanguageModel.from_pretrained(
-    '{model}',
+    os.environ['VIBEML_MODEL'],
     max_seq_length={max_seq_length},
     dtype=None,
     load_in_4bit=True,
@@ -167,8 +213,8 @@ model = FastLanguageModel.get_peft_model(
     loftq_config=None,
 )
 
-print('Loading dataset: {dataset}')
-dataset = load_dataset('{dataset}', split='train')
+print('Loading dataset:', os.environ['VIBEML_DATASET'])
+dataset = load_dataset(os.environ['VIBEML_DATASET'], split='train')
 
 trainer = SFTTrainer(
     model=model,
@@ -191,7 +237,7 @@ trainer = SFTTrainer(
         weight_decay=0.01,
         lr_scheduler_type='linear',
         seed=3407,
-        output_dir='{output_dir}',
+        output_dir=os.environ['VIBEML_OUTPUT_DIR'],
         save_strategy='steps',
         save_steps=50,
     ),
@@ -201,8 +247,8 @@ print('Starting training...')
 trainer.train()
 
 print('Saving model...')
-model.save_pretrained('{output_dir}/final_model')
-tokenizer.save_pretrained('{output_dir}/final_model')
+model.save_pretrained(os.path.join(os.environ['VIBEML_OUTPUT_DIR'], 'final_model'))
+tokenizer.save_pretrained(os.path.join(os.environ['VIBEML_OUTPUT_DIR'], 'final_model'))
 print('Training complete!')
 "
 """
@@ -210,11 +256,13 @@ print('Training complete!')
     try:
         return _nebius_task(
             f"vibeml-unsloth-{model.replace('/', '-')}",
-            setup_script,
+            install_script,
             run_script,
             compute,
             use_spot=True,
+            output_dir=output_dir,
             cloud_bucket=cloud_bucket,
+            envs={"VIBEML_MODEL": model, "VIBEML_DATASET": dataset},
         )
 
     except Exception as e:
@@ -224,7 +272,7 @@ print('Training complete!')
 def create_gpt_oss_lora_task(
     model_size: str = "20b",
     dataset: str = "tatsu-lab/alpaca",
-    output_dir: str = "./outputs",
+    output_dir: str = OUTPUTS_DIR,
     cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for GPT-OSS LoRA fine-tuning on Nebius.
@@ -234,7 +282,7 @@ def create_gpt_oss_lora_task(
     Args:
         model_size: Model size - "20b" or "120b"
         dataset: HuggingFace dataset ID
-        output_dir: Directory for saving outputs
+        output_dir: Absolute directory for outputs; the bucket mount point
         cloud_bucket: Optional cloud bucket for checkpoints
 
     Returns:
@@ -253,6 +301,7 @@ def create_gpt_oss_lora_task(
         ),
     }
 
+    _check_output_dir(output_dir)
     if model_size not in model_configs:
         raise ValidationError(
             f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}"
@@ -260,7 +309,7 @@ def create_gpt_oss_lora_task(
 
     config = model_configs[model_size]
 
-    setup_script = """
+    install_script = """
 pip install --upgrade pip
 pip install torch transformers accelerate peft datasets bitsandbytes
 pip install flash-attn --no-build-isolation
@@ -268,6 +317,7 @@ pip install flash-attn --no-build-isolation
 
     run_script = f"""
 python -c "
+import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from peft import LoraConfig, get_peft_model, TaskType
@@ -297,11 +347,11 @@ peft_config = LoraConfig(
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 
-print('Loading dataset: {dataset}')
-dataset = load_dataset('{dataset}', split='train')
+print('Loading dataset:', os.environ['VIBEML_DATASET'])
+dataset = load_dataset(os.environ['VIBEML_DATASET'], split='train')
 
 training_args = TrainingArguments(
-    output_dir='{output_dir}',
+    output_dir=os.environ['VIBEML_OUTPUT_DIR'],
     per_device_train_batch_size=1,
     gradient_accumulation_steps=8,
     num_train_epochs=1,
@@ -331,7 +381,7 @@ print('Starting training...')
 trainer.train()
 
 print('Saving model...')
-trainer.save_model('{output_dir}/final_model')
+trainer.save_model(os.path.join(os.environ['VIBEML_OUTPUT_DIR'], 'final_model'))
 print('Training complete!')
 "
 """
@@ -339,11 +389,13 @@ print('Training complete!')
     try:
         return _nebius_task(
             f"vibeml-gpt-oss-lora-{model_size}",
-            setup_script,
+            install_script,
             run_script,
             config.compute,
             use_spot=True,
+            output_dir=output_dir,
             cloud_bucket=cloud_bucket,
+            envs={"VIBEML_DATASET": dataset},
         )
 
     except Exception as e:
@@ -353,7 +405,7 @@ print('Training complete!')
 def create_gpt_oss_full_task(
     model_size: str = "20b",
     dataset: str = "tatsu-lab/alpaca",
-    output_dir: str = "./outputs",
+    output_dir: str = OUTPUTS_DIR,
     cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for GPT-OSS full fine-tuning on Nebius.
@@ -361,7 +413,7 @@ def create_gpt_oss_full_task(
     Args:
         model_size: Model size - "20b" or "120b"
         dataset: HuggingFace dataset ID
-        output_dir: Directory for saving outputs
+        output_dir: Absolute directory for outputs; the bucket mount point
         cloud_bucket: Optional cloud bucket for checkpoints
 
     Returns:
@@ -380,6 +432,7 @@ def create_gpt_oss_full_task(
         ),
     }
 
+    _check_output_dir(output_dir)
     if model_size not in model_configs:
         raise ValidationError(
             f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}"
@@ -389,7 +442,7 @@ def create_gpt_oss_full_task(
 
     # For multi-node training, we'd need more complex setup
     # This is simplified for single-node
-    setup_script = """
+    install_script = """
 pip install --upgrade pip
 pip install torch transformers accelerate datasets deepspeed
 pip install flash-attn --no-build-isolation
@@ -404,11 +457,13 @@ echo "Would require DeepSpeed/FSDP configuration for production use"
     try:
         return _nebius_task(
             f"vibeml-gpt-oss-full-{model_size}",
-            setup_script,
+            install_script,
             run_script,
             config.compute,
             use_spot=False,  # Full fine-tuning needs stable instances
+            output_dir=output_dir,
             cloud_bucket=cloud_bucket,
+            envs={"VIBEML_DATASET": dataset},
         )
 
     except Exception as e:
@@ -474,5 +529,5 @@ def build_task(
         return create(
             model=model, dataset=dataset, gpu_type=gpu_type or "L40S", **given
         )
-    output_dir = {"output_dir": given["output_dir"]} if "output_dir" in given else {}
-    return create(model_size=model, dataset=dataset, **output_dir)
+    shared = {k: given[k] for k in ("output_dir", "cloud_bucket") if k in given}
+    return create(model_size=model, dataset=dataset, **shared)
