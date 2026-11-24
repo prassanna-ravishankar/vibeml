@@ -38,6 +38,13 @@ def status_response(name: str, status: sky.ClusterStatus) -> StatusResponse:
     )
 
 
+@pytest.fixture(autouse=True)
+def no_observe_delay() -> Any:
+    """Re-observe launch requests immediately in tests."""
+    with patch.object(skypilot, "_OBSERVE_RETRY_SECONDS", 0):
+        yield
+
+
 @pytest.fixture
 def sdk() -> Any:
     """Patch the SkyPilot SDK as seen by the adapter.
@@ -57,6 +64,9 @@ def sdk() -> Any:
         mock_sky.launch.return_value = "req-launch"
         mock_sky.down.return_value = "req-down"
         mock_sky.api_info.return_value.api_version = "13"
+        mock_sky.api_status.return_value = [
+            MagicMock(request_id="req-launch", status="FAILED")
+        ]
         yield mock_sky
 
 
@@ -205,6 +215,81 @@ class TestLaunch:
 
         sdk.down.assert_called_once_with("vibeml-a")
         sdk.get.assert_any_call("req-down")
+
+    async def test_transient_observation_error_does_not_tear_down(
+        self, sdk: MagicMock
+    ) -> None:
+        """A dropped connection while watching is not a launch failure."""
+        observations = iter([ConnectionError("API server unreachable"), None])
+
+        def get(request_id: str) -> None:
+            outcome = next(observations)
+            if outcome is not None:
+                raise outcome
+
+        sdk.get.side_effect = get
+        sdk.api_status.return_value = [
+            MagicMock(request_id="req-launch", status="RUNNING")
+        ]
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        await launch.settled
+
+        assert sdk.get.call_count == 2
+        sdk.down.assert_not_called()
+
+    async def test_unobservable_status_does_not_tear_down(self, sdk: MagicMock) -> None:
+        """If the status cannot be read either, keep watching instead of tearing down."""
+        observations = iter([ConnectionError("down"), None])
+
+        def get(request_id: str) -> None:
+            outcome = next(observations)
+            if outcome is not None:
+                raise outcome
+
+        sdk.get.side_effect = get
+        sdk.api_status.side_effect = ConnectionError("still down")
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        await launch.settled
+
+        sdk.down.assert_not_called()
+
+    async def test_cancelled_request_is_torn_down(self, sdk: MagicMock) -> None:
+        """A cancelled launch request may leave partial resources, so it is cleaned up."""
+        sdk.get.side_effect = RuntimeError("request cancelled")
+        sdk.api_status.return_value = [
+            MagicMock(request_id="req-launch", status="CANCELLED")
+        ]
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        await launch.settled
+
+        sdk.down.assert_called_once_with("vibeml-a")
+
+    async def test_caller_cancellation_keeps_ownership(self, sdk: MagicMock) -> None:
+        """Cancelling the caller mid-submission still watches and cleans up the launch."""
+        submitting, release = threading.Event(), threading.Event()
+
+        def slow_launch(task: sky.Task, cluster_name: str) -> str:
+            submitting.set()
+            release.wait(timeout=5)
+            return "req-launch"
+
+        sdk.launch.side_effect = slow_launch
+        sdk.get.side_effect = RuntimeError("provisioning failed")
+
+        caller = asyncio.create_task(
+            skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        )
+        await asyncio.to_thread(submitting.wait, 5)
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        release.set()
+        await skypilot.settle_all()
+
+        sdk.down.assert_called_once_with("vibeml-a")
 
     async def test_failed_launch_kept_on_request(self, sdk: MagicMock) -> None:
         """keep_on_failure leaves a failed cluster up for debugging."""

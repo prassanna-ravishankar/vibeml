@@ -123,8 +123,12 @@ User-supplied values (`model`, `dataset`, `output_dir`) reach the training scrip
 What the cap covers, and what it does not:
 
 - SkyPilot arms autostop after provisioning, file and storage sync, and setup. vibeml keeps setup to output-directory preparation and installs dependencies at the start of the run, so slow or hanging installs and training are covered.
-- **Failed launches are cleaned up by the launcher.** `launch_training` returns immediately, but the MCP server keeps watching the launch request. If it fails before the job starts (provisioning, storage mount, directory setup), the server tears the cluster down. Pass `keep_on_failure=True` to keep it for debugging.
-- **Not covered**: provisioning and setup time is billed but not counted against the cap. If the vibeml server process itself stops before a failed launch settles, nothing tears the cluster down; check `sky status`.
+- **Failed launches are cleaned up by the launcher.** `launch_training` returns immediately, but the MCP server keeps watching the launch request, even if the MCP call is cancelled. When the API server confirms the request failed or was cancelled (provisioning, storage mount, directory setup), the server tears the cluster down. Errors observing the request, such as a dropped connection, are retried and never treated as failure, so a healthy job is not torn down by mistake. Pass `keep_on_failure=True` to keep a failed cluster for debugging.
+- **Not covered** (check `sky status` if in doubt):
+    - Provisioning and setup time is billed but not counted against the cap.
+    - A launch that hangs before the job starts (stuck provisioning, mount or setup) has no timer armed, and the watcher only acts once the request settles.
+    - If the teardown of a failed launch itself fails, it is logged, not retried.
+    - If the vibeml server process stops before a failed launch settles, nothing tears the cluster down.
 - The timer is polled about once a minute, and cloud teardown takes time, so the cap is approximate. Prices are vibeml's Nebius estimates, including the spot discount.
 
 ## Request Flow
