@@ -7,6 +7,7 @@ on:
       - master
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   release-drafter:
@@ -24,8 +25,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Manual only. Publishing needs TestPyPI credentials the repo does not have:
+  # either a TEST_PYPI_TOKEN secret, or a TestPyPI trusted publisher for this
+  # workflow plus `permissions: id-token: write` on this job. Run it from the
+  # Actions tab once one is set up.
   publish-to-testpypi:
-    if: github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch'
     name: Build and Publish to TestPyPI
     runs-on: ubuntu-latest
     steps:
