@@ -118,7 +118,7 @@ Torn-down clusters disappear from SkyPilot's status, so `get_training_status` re
 1. **Before launch**: the task's real resources are priced for `estimated_hours` (`CostEstimator.estimate_task`). If the expected cost exceeds `max_cost`, the tool returns `over_budget` and nothing is submitted.
 2. **During the run**: the budget is converted into runtime (`CostEstimator.affordable_minutes`, the budget divided by the hourly rate). The cluster is launched with SkyPilot autostop set to that many minutes, `wait_for=NONE` and `down=True`, so it is torn down when the budget's runtime is up, even if training is still running.
 
-The cap is approximate: prices are vibeml's Nebius estimates (spot discount included), and time spent provisioning before autostop is armed is not counted.
+The cap is approximate: prices are vibeml's Nebius estimates (spot discount included), and SkyPilot starts the autostop timer when the job starts on the cluster, so provisioning time before that is billed but not counted.
 
 ## Request Flow
 

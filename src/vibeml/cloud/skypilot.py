@@ -145,8 +145,9 @@ async def launch(
         task: Task to run.
         cluster_name: Name for the new cluster.
         max_minutes: Hard runtime cap. The cluster is torn down this many
-            minutes after autostop is armed, whether or not jobs are still
-            running (SkyPilot autostop with ``wait_for=NONE`` and ``down``).
+            minutes after the job starts, whether or not it is still running
+            (SkyPilot autostop with ``wait_for=NONE`` and ``down``; the
+            autostop timer resets when a job starts).
 
     Returns:
         The launch request ID.
