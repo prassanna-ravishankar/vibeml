@@ -121,7 +121,7 @@ jobs:
           args: >-
             --verbose --no-progress
             --root-dir ${{ github.workspace }}/site
-            --exclude '^https://vibeml\.readthedocs\.io'
+            --exclude '^https://prassanna\.io/vibeml'
             --exclude '^https://console\.nebius\.com'
             'site/**/*.html'
           fail: true

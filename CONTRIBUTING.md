@@ -13,7 +13,7 @@ Here is a list of important resources for contributors:
 
 [mit license]: https://opensource.org/licenses/MIT
 [source code]: https://github.com/prassanna-ravishankar/vibeml
-[documentation]: https://vibeml.readthedocs.io/
+[documentation]: https://prassanna.io/vibeml/
 [issue tracker]: https://github.com/prassanna-ravishankar/vibeml/issues
 
 ## How to report a bug

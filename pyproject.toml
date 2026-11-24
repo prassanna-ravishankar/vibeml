@@ -27,7 +27,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/prassanna-ravishankar/vibeml"
 Repository = "https://github.com/prassanna-ravishankar/vibeml"
-Documentation = "https://vibeml.readthedocs.io"
+Documentation = "https://prassanna.io/vibeml"
 Changelog = "https://github.com/prassanna-ravishankar/vibeml/releases"
 
 [dependency-groups]
