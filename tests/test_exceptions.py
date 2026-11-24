@@ -1,6 +1,6 @@
 """Tests for exception hierarchy and error handling."""
 
-import time
+from unittest.mock import patch
 
 import pytest
 
@@ -211,23 +211,75 @@ class TestRetryWithBackoff:
         assert "failed after 2 retries" in str(error.message)
         assert "Permanent error" in str(error.technical_details)
 
-    def test_exponential_backoff_timing(self) -> None:
-        """Test that backoff delays increase exponentially."""
-        call_times = []
+    def test_exponential_backoff_delays(self) -> None:
+        """Delays start at initial_delay and multiply by backoff_factor."""
+        calls = []
 
         @retry_with_backoff(max_retries=3, initial_delay=0.1, backoff_factor=2.0)
-        def track_timing() -> None:
-            call_times.append(time.time())
-            if len(call_times) < 4:
+        def flaky() -> str:
+            calls.append(1)
+            if len(calls) < 4:
                 raise ValueError("Retry")
+            return "ok"
 
-        track_timing()
+        with patch("vibeml.exceptions.time.sleep") as sleep:
+            assert flaky() == "ok"
 
-        # Check that delays roughly double (with some tolerance for timing)
-        delays = [call_times[i + 1] - call_times[i] for i in range(len(call_times) - 1)]
-        assert len(delays) == 3
-        # First delay ~0.1s, second ~0.2s, third ~0.4s
-        assert delays[0] < delays[1] < delays[2]
+        assert [c.args[0] for c in sleep.call_args_list] == pytest.approx(
+            [0.1, 0.2, 0.4]
+        )
+
+    def test_zero_retries_calls_once(self) -> None:
+        """max_retries=0 makes one attempt and wraps its failure."""
+        calls = []
+
+        @retry_with_backoff(max_retries=0)
+        def failing() -> None:
+            calls.append(1)
+            raise ValueError("boom")
+
+        with patch("vibeml.exceptions.time.sleep") as sleep:
+            with pytest.raises(SkyPilotError) as exc_info:
+                failing()
+
+        assert len(calls) == 1
+        sleep.assert_not_called()
+        assert isinstance(exc_info.value.__cause__, ValueError)
+
+    def test_exhaustion_chains_last_error(self) -> None:
+        """The final failure is the cause of the SkyPilotError."""
+        errors = iter([ValueError("first"), ValueError("second"), ValueError("last")])
+
+        @retry_with_backoff(max_retries=2)
+        def failing() -> None:
+            raise next(errors)
+
+        with patch("vibeml.exceptions.time.sleep"):
+            with pytest.raises(SkyPilotError) as exc_info:
+                failing()
+
+        assert str(exc_info.value.__cause__) == "last"
+
+    def test_uncaught_exceptions_are_not_retried(self) -> None:
+        """Exceptions outside ``exceptions`` propagate immediately, unwrapped."""
+        calls = []
+
+        @retry_with_backoff(max_retries=3, exceptions=(ValueError,))
+        def failing() -> None:
+            calls.append(1)
+            raise KeyError("not retryable")
+
+        with patch("vibeml.exceptions.time.sleep") as sleep:
+            with pytest.raises(KeyError):
+                failing()
+
+        assert len(calls) == 1
+        sleep.assert_not_called()
+
+    def test_negative_retries_rejected(self) -> None:
+        """A negative retry count is a programming error."""
+        with pytest.raises(ValueError, match="max_retries"):
+            retry_with_backoff(max_retries=-1)
 
 
 class TestErrorTranslator:
