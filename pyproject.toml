@@ -96,6 +96,9 @@ exclude_lines = [
   "if TYPE_CHECKING:",
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.mypy]
 strict = true
 warn_unreachable = true
