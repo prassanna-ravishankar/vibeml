@@ -415,3 +415,37 @@ def get_workflow(workflow_type: str) -> Callable[..., sky.Task]:
         available = ", ".join(WORKFLOWS.keys())
         raise ValueError(f"Unknown workflow: {workflow_type}. Available: {available}")
     return WORKFLOWS[workflow_type]
+
+def build_task(
+    workflow: str,
+    model: str,
+    dataset: str,
+    gpu_type: Optional[str] = None,
+    **hyperparameters: Any,
+) -> sky.Task:
+    """Build the SkyPilot task for a workflow from tool-level parameters.
+
+    Args:
+        workflow: Workflow name, a key of ``WORKFLOWS``.
+        model: HuggingFace model ID, or the model size ("20b", "120b") for
+            GPT-OSS workflows.
+        dataset: HuggingFace dataset ID.
+        gpu_type: GPU type for Unsloth; GPT-OSS sizes fix their own GPUs.
+        **hyperparameters: Optional workflow arguments; None values are ignored.
+
+    Returns:
+        The configured task.
+
+    Raises:
+        ValidationError: If the workflow is unknown or its inputs are invalid.
+    """
+    try:
+        create = get_workflow(workflow)
+    except ValueError as e:
+        raise ValidationError(str(e)) from e
+
+    given = {k: v for k, v in hyperparameters.items() if v is not None}
+    if workflow == "unsloth":
+        return create(model=model, dataset=dataset, gpu_type=gpu_type or "L40S", **given)
+    output_dir = {"output_dir": given["output_dir"]} if "output_dir" in given else {}
+    return create(model_size=model, dataset=dataset, **output_dir)

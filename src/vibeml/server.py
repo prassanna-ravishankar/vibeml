@@ -1,78 +1,50 @@
-"""FastMCP server for VibeML - natural language interface to AI training."""
+"""FastMCP server for VibeML - natural language interface to AI training.
 
-import asyncio
+This module is vibeml's socket: it exposes MCP tools and translates between
+tool arguments and vibeml's own layers. Task construction lives in
+``tasks``, pricing in ``cloud.cost_estimator``, and SkyPilot in
+``cloud.skypilot``.
+"""
+
+import logging
+import os
+import sys
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
-from pathlib import Path
+from typing import Annotated, Any, TextIO
 
 from fastmcp import FastMCP
-import sky
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
-from .tasks import get_workflow, WORKFLOWS
-from .exceptions import SkyPilotError, ValidationError, ResourceError
-from .models import (
-    TrainingRequest,
-    JobHandle,
-    JobStatus,
-    CostEstimate,
-    WorkflowMetadata,
+from .cloud import CostEstimator, skypilot
+from .exceptions import SkyPilotError, TaskGenerationError, ValidationError
+from .models import JobStatus, TrainingRequest
+from .tasks import WORKFLOWS, build_task
+
+logger = logging.getLogger(__name__)
+
+CLUSTER_PREFIX = "vibeml-"
+ACTIVE_STATUSES = {JobStatus.PENDING, JobStatus.RUNNING}
+
+mcp = FastMCP(
+    "vibeml",
+    instructions="Natural language interface for AI model training on Nebius Cloud",
+    version="0.0.1",
 )
 
 
-# Initialize FastMCP server
-mcp = FastMCP("vibeml", version="0.0.1")
-mcp.description = "Natural language interface for AI model training on Nebius Cloud"
-
-
-def _map_sky_status_to_job_status(sky_status: str) -> JobStatus:
-    """Map SkyPilot cluster status to VibeML JobStatus.
-
-    SkyPilot statuses: INIT, UP, STOPPED, TERMINATED
-    Unknown statuses are mapped to FAILED as they likely indicate issues.
-    """
-    status_map = {
-        "INIT": JobStatus.PENDING,
-        "UP": JobStatus.RUNNING,
-        "STOPPED": JobStatus.TERMINATED,
-        "TERMINATED": JobStatus.TERMINATED,
-    }
-    return status_map.get(sky_status, JobStatus.FAILED)
-
-
-async def _get_cluster_from_skypilot(cluster_id: str) -> Optional[Dict[str, Any]]:
-    """Get cluster information from SkyPilot's state.
+def _error(kind: str, message: str) -> dict[str, Any]:
+    """Build an error response.
 
     Args:
-        cluster_id: Cluster name to query
+        kind: Machine-readable error kind.
+        message: Human-readable explanation.
 
     Returns:
-        Dict with cluster info or None if not found
+        The error response.
     """
-    try:
-        loop = asyncio.get_event_loop()
-        clusters = await loop.run_in_executor(
-            None,
-            lambda: sky.status(cluster_names=[cluster_id], refresh=True)
-        )
-
-        if not clusters:
-            return None
-
-        # SkyPilot returns list of cluster records
-        # Each has: name, status, launched_at, resources, handle
-        cluster = clusters[0]
-        return {
-            "cluster_name": cluster.name,
-            "status": str(cluster.status),
-            "launched_at": cluster.launched_at,
-            "resources": cluster.resources,
-            "handle": cluster.handle,
-        }
-    except Exception as e:
-        print(f"Failed to get cluster {cluster_id} from SkyPilot: {e}")
-        return None
+    return {"status": "error", "error": kind, "message": message}
 
 
 @mcp.tool()
@@ -80,21 +52,24 @@ async def launch_training(
     workflow: str = "unsloth",
     model: str = "mistralai/Mistral-7B-v0.1",
     dataset: str = "tatsu-lab/alpaca",
-    gpu_type: Optional[str] = None,
-    max_steps: Optional[int] = 60,
-    max_cost: Optional[float] = None,
-    learning_rate: Optional[float] = None,
-    lora_r: Optional[int] = None,
-    max_seq_length: Optional[int] = None,
-    output_dir: Optional[str] = None,
-) -> Dict[str, Any]:
+    gpu_type: str | None = None,
+    max_steps: int | None = 60,
+    max_cost: float | None = None,
+    learning_rate: float | None = None,
+    lora_r: int | None = None,
+    max_seq_length: int | None = None,
+    output_dir: str | None = None,
+) -> dict[str, Any]:
     """Launch a model training job on Nebius Cloud.
+
+    The launch is submitted and this tool returns immediately; provisioning
+    takes several minutes. Follow it with ``get_training_status``.
 
     Args:
         workflow: Training workflow type (unsloth, gpt-oss-lora, gpt-oss-full)
-        model: HuggingFace model ID or size for GPT-OSS (e.g., "20b")
+        model: HuggingFace model ID, or size for GPT-OSS ("20b", "120b")
         dataset: HuggingFace dataset ID
-        gpu_type: GPU type (L40S, RTX4090, H100, A100) - auto-selected if not specified
+        gpu_type: GPU type (L40S, RTX4090, H100, A100) for Unsloth
         max_steps: Maximum training steps
         max_cost: Maximum cost limit in USD
         learning_rate: Learning rate for training
@@ -103,202 +78,130 @@ async def launch_training(
         output_dir: Output directory for results
 
     Returns:
-        Dict with cluster_id, status, and launch details
-
-    Examples:
-        - "Train Mistral 7B on Alpaca dataset using cheapest GPU"
-        - "Fine-tune Llama model with LoRA on my custom dataset"
-        - "Launch GPT-OSS 20B LoRA training on H100 GPUs"
+        Dict with cluster_id, the launch request ID, and how to follow it
     """
+    hyperparameters = {
+        "max_steps": max_steps,
+        "learning_rate": learning_rate,
+        "lora_r": lora_r,
+        "max_seq_length": max_seq_length,
+        "output_dir": output_dir,
+    }
     try:
-        # Validate request using Pydantic model
-        try:
-            request = TrainingRequest(
-                model=model,
-                dataset=dataset,
-                workflow=workflow,
-                gpu_type=gpu_type,
-                max_cost=max_cost,
-                hyperparameters={
-                    k: v for k, v in {
-                        "learning_rate": learning_rate,
-                        "lora_r": lora_r,
-                        "max_seq_length": max_seq_length,
-                        "output_dir": output_dir,
-                        "max_steps": max_steps,
-                    }.items() if v is not None
-                },
-            )
-        except PydanticValidationError as e:
-            return {
-                "status": "error",
-                "error": "validation_error",
-                "message": str(e),
-                "details": e.errors(),
-            }
-
-        # Get the workflow function
-        workflow_func = get_workflow(workflow)
-
-        # Prepare arguments based on workflow type
-        task_args = {}
-
-        if workflow == "unsloth":
-            task_args = {
-                "model": model,
-                "dataset": dataset,
-                "gpu_type": gpu_type or "L40S",  # Default to L40S for cost-effectiveness
-                "max_steps": max_steps,
-            }
-            # Add optional workflow-specific parameters
-            if learning_rate is not None:
-                task_args["learning_rate"] = learning_rate
-            if lora_r is not None:
-                task_args["lora_r"] = lora_r
-            if max_seq_length is not None:
-                task_args["max_seq_length"] = max_seq_length
-            if output_dir is not None:
-                task_args["output_dir"] = output_dir
-
-        elif workflow in ["gpt-oss-lora", "gpt-oss-full"]:
-            # For GPT-OSS, model is the size (20b, 120b)
-            task_args = {
-                "model_size": model if model in ["20b", "120b"] else "20b",
-                "dataset": dataset,
-            }
-            if output_dir is not None:
-                task_args["output_dir"] = output_dir
-
-        # Generate the SkyPilot task
-        task = workflow_func(**task_args)
-
-        # Generate unique cluster name
-        cluster_id = f"vibeml-{workflow}-{uuid.uuid4().hex[:8]}"
-
-        # Launch the task asynchronously
-        print(f"Launching {workflow} training job: {cluster_id}")
-
-        # Use asyncio to run SkyPilot's sync launch in background
-        loop = asyncio.get_event_loop()
-        cluster_handle = await loop.run_in_executor(
-            None,
-            lambda: sky.launch(task, cluster_name=cluster_id, detach_run=True)
+        request = TrainingRequest(
+            model=model,
+            dataset=dataset,
+            workflow=workflow,
+            gpu_type=gpu_type,
+            max_cost=max_cost,
+            hyperparameters={k: v for k, v in hyperparameters.items() if v is not None},
         )
+        task = build_task(workflow, model, dataset, gpu_type, **hyperparameters)
+    except (PydanticValidationError, ValidationError) as e:
+        return _error("validation_error", str(e))
+    except TaskGenerationError as e:
+        return _error("task_generation_error", str(e))
 
-        return {
-            "cluster_id": cluster_id,
-            "status": "launched",
-            "workflow": request.workflow,
-            "model": request.model,
-            "dataset": request.dataset,
-            "message": f"Training job launched successfully on Nebius Cloud",
-            "monitor_command": f"sky status {cluster_id}",
-            "logs_command": f"sky logs {cluster_id}",
-        }
+    cluster_id = f"{CLUSTER_PREFIX}{workflow}-{uuid.uuid4().hex[:8]}"
+    try:
+        request_id = await skypilot.launch(task, cluster_name=cluster_id)
+    except SkyPilotError as e:
+        return _error("skypilot_error", str(e))
 
-    except ValidationError as e:
-        return {
-            "status": "error",
-            "error": "validation_error",
-            "message": str(e),
-        }
-    except Exception as e:
-        raise SkyPilotError(f"Failed to launch training: {str(e)}")
+    logger.info(
+        "Submitted %s launch for %s (request %s)", workflow, cluster_id, request_id
+    )
+    return {
+        "status": "submitted",
+        "cluster_id": cluster_id,
+        "launch_request_id": request_id,
+        "workflow": request.workflow,
+        "model": request.model,
+        "dataset": request.dataset,
+        "logs_command": f"sky api logs {request_id}",
+    }
 
 
 @mcp.tool()
-async def get_training_status(cluster_id: str) -> Dict[str, Any]:
-    """Get the status of a running training job.
+async def get_training_status(cluster_id: str) -> dict[str, Any]:
+    """Get the status of a training job's cluster.
+
+    This is cluster status: "running" means the cluster is up, not that the
+    training script is still running. Use ``sky queue <cluster_id>`` for the
+    job itself.
 
     Args:
         cluster_id: The cluster ID returned from launch_training
 
     Returns:
-        Dict with cluster status, logs preview, and resource usage
+        Dict with the cluster's job status and SkyPilot's cluster status
     """
     try:
-        # Get cluster info directly from SkyPilot
-        cluster_info = await _get_cluster_from_skypilot(cluster_id)
+        cluster = await skypilot.get_cluster(cluster_id)
+    except SkyPilotError as e:
+        return _error("skypilot_error", str(e))
 
-        if not cluster_info:
-            return {
-                "status": "error",
-                "message": f"Cluster {cluster_id} not found in SkyPilot state",
-            }
-
-        # Map SkyPilot status to our JobStatus
-        job_status = _map_sky_status_to_job_status(cluster_info["status"])
-
-        return {
-            "cluster_id": cluster_id,
-            "status": job_status.value,
-            "sky_status": cluster_info["status"],
-            "launched_at": cluster_info["launched_at"].isoformat() if cluster_info["launched_at"] else None,
-            "message": f"Cluster is {cluster_info['status'].lower()}",
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to get status: {str(e)}",
-        }
+    if cluster is None:
+        return _error(
+            "not_found",
+            f"Cluster {cluster_id} is not known to SkyPilot. If it was just launched, "
+            "follow provisioning with `sky api logs <launch_request_id>`.",
+        )
+    return {
+        "cluster_id": cluster.name,
+        "status": cluster.status.value,
+        "sky_status": cluster.sky_status,
+        "launched_at": cluster.launched_at.isoformat() if cluster.launched_at else None,
+    }
 
 
 @mcp.tool()
-async def stop_training(cluster_id: str, download_results: bool = True) -> Dict[str, Any]:
-    """Stop a running training job and optionally download results.
+async def stop_training(
+    cluster_id: str, download_results: bool = True
+) -> dict[str, Any]:
+    """Tear a training cluster down, optionally downloading its logs first.
+
+    Log download is best effort: a cluster that is not up (for example
+    stopped) has no logs to fetch, and a running cluster costs money, so
+    teardown always proceeds.
 
     Args:
         cluster_id: The cluster ID to stop
-        download_results: Whether to download results before stopping
+        download_results: Whether to download job logs before tearing down
 
     Returns:
-        Dict with stop status and download location if applicable
+        Dict with stop status, the local log directories, and any log error
     """
     try:
-        # Verify cluster exists in SkyPilot
-        cluster_info = await _get_cluster_from_skypilot(cluster_id)
-        if not cluster_info:
-            return {
-                "status": "error",
-                "message": f"Cluster {cluster_id} not found",
-            }
+        if await skypilot.get_cluster(cluster_id) is None:
+            return _error("not_found", f"Cluster {cluster_id} not found")
+    except SkyPilotError as e:
+        return _error("skypilot_error", str(e))
 
-        # Download results if requested
-        download_path = None
-        if download_results:
-            download_path = f"./vibeml_outputs/{cluster_id}"
-            Path(download_path).mkdir(parents=True, exist_ok=True)
+    result: dict[str, Any] = {
+        "status": "stopped",
+        "cluster_id": cluster_id,
+        "log_paths": {},
+    }
+    if download_results:
+        try:
+            result["log_paths"] = await skypilot.download_logs(cluster_id)
+        except SkyPilotError as e:
+            logger.warning("Log download for %s failed: %s", cluster_id, e)
+            result["log_error"] = str(e)
 
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: sky.download_logs(cluster_id, download_path)
-            )
-
-        # Stop the cluster
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: sky.down(cluster_id)
+    try:
+        await skypilot.down(cluster_id)
+    except SkyPilotError as e:
+        return _error(
+            "skypilot_error",
+            f"Teardown of {cluster_id} failed; it may still be running: {e}",
         )
-
-        return {
-            "status": "stopped",
-            "cluster_id": cluster_id,
-            "message": "Training job stopped successfully",
-            "download_path": download_path if download_results else None,
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to stop training: {str(e)}",
-        }
+    return result
 
 
 @mcp.tool()
-async def list_available_workflows() -> Dict[str, Any]:
+async def list_available_workflows() -> dict[str, Any]:
     """List all available training workflows and their descriptions.
 
     Returns:
@@ -306,32 +209,27 @@ async def list_available_workflows() -> Dict[str, Any]:
     """
     workflows_info = {
         "unsloth": {
-            "description": "Efficient fine-tuning for 7B-13B models using 4-bit quantization + LoRA",
+            "description": (
+                "Efficient fine-tuning for 7B-13B models with 4-bit quantization + LoRA"
+            ),
             "gpu_types": ["L40S", "RTX4090", "H100", "A100"],
-            "estimated_cost": "$0.50-2/hour",
-            "training_time": "2-8 hours",
             "best_for": "Quick experiments, cost-effective training",
         },
         "gpt-oss-lora": {
             "description": "LoRA fine-tuning for large GPT models (20B-120B)",
             "gpu_types": ["H100"],
-            "estimated_cost": "$6-24/hour",
-            "training_time": "4-24 hours",
             "best_for": "Production quality with lower resource usage",
         },
         "gpt-oss-full": {
             "description": "Full parameter training for maximum quality",
             "gpu_types": ["H100"],
-            "estimated_cost": "$24-200/hour",
-            "training_time": "8-48 hours",
             "best_for": "Maximum quality, large-scale production training",
         },
     }
-
     return {
         "workflows": workflows_info,
-        "available": list(WORKFLOWS.keys()),
-        "message": "Choose a workflow based on your model size and quality requirements",
+        "available": list(WORKFLOWS),
+        "message": "Use estimate_training_cost for pricing before launching",
     }
 
 
@@ -339,131 +237,131 @@ async def list_available_workflows() -> Dict[str, Any]:
 async def estimate_training_cost(
     workflow: str = "unsloth",
     model: str = "mistralai/Mistral-7B-v0.1",
-    gpu_type: Optional[str] = None,
-    estimated_hours: float = 4.0,
-) -> Dict[str, Any]:
+    dataset: str = "tatsu-lab/alpaca",
+    gpu_type: str | None = None,
+    estimated_hours: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 4.0,
+) -> dict[str, Any]:
     """Estimate the cost of a training job before launching.
+
+    Prices exactly the resources the workflow would request.
 
     Args:
         workflow: Training workflow type
-        model: Model ID or size
-        gpu_type: GPU type (auto-selected if not specified)
+        model: Model ID, or size for GPT-OSS ("20b", "120b")
+        dataset: HuggingFace dataset ID
+        gpu_type: GPU type for Unsloth (auto-selected if not specified)
         estimated_hours: Estimated training hours
 
     Returns:
-        Dict with cost estimation and recommendations
+        Dict with the priced resources and the cost range
     """
-    # Nebius GPU pricing (approximate - would fetch real prices in production)
-    gpu_prices = {
-        "L40S": 1.2,  # $/hour
-        "RTX4090": 0.8,
-        "H100": 3.5,
-        "A100": 2.4,
-    }
+    try:
+        task = build_task(workflow, model, dataset, gpu_type)
+    except ValidationError as e:
+        return _error("validation_error", str(e))
+    except TaskGenerationError as e:
+        return _error("task_generation_error", str(e))
 
-    # Determine GPU based on workflow if not specified
-    if not gpu_type:
-        if workflow == "unsloth":
-            gpu_type = "L40S"
-        elif workflow in ["gpt-oss-lora", "gpt-oss-full"]:
-            gpu_type = "H100"
-
-    if gpu_type not in gpu_prices:
-        return {
-            "status": "error",
-            "message": f"Unknown GPU type: {gpu_type}",
-        }
-
-    # Calculate costs
-    hourly_cost = gpu_prices[gpu_type]
-
-    # Adjust for multi-GPU setups
-    if workflow == "gpt-oss-lora" and "120b" in str(model):
-        hourly_cost *= 8  # 8x H100 for 120B model
-    elif workflow == "gpt-oss-lora" and "20b" in str(model):
-        hourly_cost *= 2  # 2x H100 for 20B model
-    elif workflow == "gpt-oss-full":
-        hourly_cost *= 8  # Minimum 8x H100 for full training
-
-    total_cost = hourly_cost * estimated_hours
-
-    # Add spot instance discount
-    spot_discount = 0.7  # 30% cheaper on average
-    spot_cost = total_cost * spot_discount
-
+    (resources,) = task.resources
+    ((gpu, per_node),) = resources.accelerators.items()
+    gpu_count = int(per_node) * task.num_nodes
+    estimate = CostEstimator().estimate_cost(
+        gpu_type=gpu,
+        estimated_hours=estimated_hours,
+        gpu_count=gpu_count,
+        use_spot=resources.use_spot,
+    )
     return {
         "workflow": workflow,
-        "gpu_type": gpu_type,
-        "gpu_count": 8 if "full" in workflow or "120b" in str(model) else (2 if "20b" in str(model) else 1),
-        "hourly_cost": f"${hourly_cost:.2f}",
+        "gpu_type": gpu,
+        "gpu_count": gpu_count,
+        "use_spot": resources.use_spot,
         "estimated_hours": estimated_hours,
-        "on_demand_cost": f"${total_cost:.2f}",
-        "spot_cost": f"${spot_cost:.2f}",
-        "recommended": "spot",
-        "savings": f"${total_cost - spot_cost:.2f}",
-        "message": f"Estimated cost for {estimated_hours}h training on {gpu_type} GPU(s)",
+        "hourly_cost": estimate.hourly_rate,
+        "expected_cost": estimate.expected_cost,
+        "min_cost": estimate.min_cost,
+        "max_cost": estimate.max_cost,
+        "currency": estimate.currency,
     }
 
 
 @mcp.tool()
-async def list_active_training_jobs() -> Dict[str, Any]:
-    """List all active training jobs.
+async def list_active_training_jobs() -> dict[str, Any]:
+    """List all active (pending or running) training jobs.
 
     Returns:
-        Dict with list of active training clusters
+        Dict with the active training clusters
     """
     try:
-        # Get all clusters from SkyPilot
-        loop = asyncio.get_event_loop()
-        all_clusters = await loop.run_in_executor(
-            None,
-            lambda: sky.status(refresh=True)
-        )
+        clusters = await skypilot.list_clusters(prefix=CLUSTER_PREFIX)
+    except SkyPilotError as e:
+        return _error("skypilot_error", str(e))
 
-        if not all_clusters:
-            return {
-                "active_jobs": [],
-                "count": 0,
-                "message": "No active training jobs",
-            }
-
-        # Filter for VibeML clusters (start with "vibeml-")
-        # and are in active states (INIT, UP)
-        vibeml_clusters = [
-            c for c in all_clusters
-            if c.name.startswith("vibeml-") and str(c.status) in ["INIT", "UP"]
-        ]
-
-        jobs = []
-        for cluster in vibeml_clusters:
-            jobs.append({
-                "cluster_id": cluster.name,
-                "status": _map_sky_status_to_job_status(str(cluster.status)).value,
-                "sky_status": str(cluster.status),
-                "launched_at": cluster.launched_at.isoformat() if cluster.launched_at else None,
-            })
-
-        return {
-            "active_jobs": jobs,
-            "count": len(jobs),
-            "message": f"Found {len(jobs)} active training job(s)",
+    jobs = [
+        {
+            "cluster_id": c.name,
+            "status": c.status.value,
+            "sky_status": c.sky_status,
+            "launched_at": c.launched_at.isoformat() if c.launched_at else None,
         }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to list jobs: {str(e)}",
-        }
+        for c in clusters
+        if c.status in ACTIVE_STATUSES
+    ]
+    return {"active_jobs": jobs, "count": len(jobs)}
 
 
-def run_server():
-    """Run the FastMCP server."""
-    import asyncio
-    from fastmcp.server import run_stdio
+class _ReleaseStdout(Middleware):
+    """Point ``sys.stdout`` back at the console once the transport is bound.
 
-    print("Starting VibeML MCP Server...")
-    print(f"Available workflows: {', '.join(WORKFLOWS.keys())}")
-    print("Note: Job state is managed by SkyPilot (~/.sky/state.json)")
+    Initialize is the first message of every MCP session, so no tool (and no
+    SkyPilot call) can run before this.
+    """
 
-    # Run the server
-    asyncio.run(run_stdio(mcp))
+    def __init__(self, console: TextIO) -> None:
+        """Remember the console stream to restore.
+
+        Args:
+            console: Stream that call-time ``print()`` should use.
+        """
+        self._console = console
+
+    async def on_initialize(
+        self, context: MiddlewareContext[Any], call_next: CallNext[Any, Any]
+    ) -> Any:
+        """Restore the console stream, then continue initialization.
+
+        Args:
+            context: Middleware context.
+            call_next: Next handler in the chain.
+
+        Returns:
+            The initialize result.
+        """
+        sys.stdout = self._console
+        return await call_next(context)
+
+
+def run_server() -> None:
+    """Run the MCP server over stdio.
+
+    Stdout belongs to the MCP protocol, but SkyPilot writes to it: it prints
+    streamed request logs and its logging handler targets ``sys.stdout``. So
+    file descriptor 1 is pointed at stderr for the whole process, and the
+    transport gets a private duplicate of the real stdout.
+
+    This takes over the process: stdout stays redirected and the middleware
+    stays registered until exit, so call it once, as the CLI does, and do not
+    embed it in a process that needs its own stdout.
+    """
+    logging.basicConfig(level=logging.INFO)
+    console = sys.stdout
+    console.flush()
+    protocol = os.fdopen(os.dup(console.fileno()), "w", encoding="utf-8")
+    os.dup2(sys.stderr.fileno(), console.fileno())
+
+    # The stdio transport binds sys.stdout when it starts; afterwards
+    # _ReleaseStdout hands sys.stdout back to the (now stderr-backed) console.
+    sys.stdout = protocol
+    mcp.add_middleware(_ReleaseStdout(console))
+    logger.info("Available workflows: %s", ", ".join(WORKFLOWS))
+    mcp.run()

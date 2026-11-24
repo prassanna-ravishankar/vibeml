@@ -3,6 +3,7 @@
 import pytest
 import sky
 from vibeml.tasks import (
+    build_task,
     create_unsloth_task,
     create_gpt_oss_lora_task,
     create_gpt_oss_full_task,
@@ -183,3 +184,44 @@ class TestWorkflowRegistry:
         assert "gpt-oss-lora" in WORKFLOWS
         assert "gpt-oss-full" in WORKFLOWS
         assert len(WORKFLOWS) == 3
+
+class TestBuildTask:
+    """build_task maps tool-level parameters onto a workflow's arguments."""
+
+    def test_unsloth_defaults_to_l40s(self) -> None:
+        """Without a GPU type, Unsloth uses the cost-effective L40S."""
+        task = build_task("unsloth", model="mistralai/Mistral-7B-v0.1", dataset="tatsu-lab/alpaca")
+
+        assert _resources(task).accelerators == {"L40S": 1}
+
+    def test_unsloth_passes_hyperparameters(self) -> None:
+        """Given hyperparameters reach the training script; others keep defaults."""
+        task = build_task(
+            "unsloth",
+            model="meta-llama/Llama-3.2-1B",
+            dataset="yahma/alpaca-cleaned",
+            gpu_type="H100",
+            max_steps=100,
+            learning_rate=1e-4,
+        )
+
+        assert _resources(task).accelerators == {"H100": 1}
+        assert "max_steps=100" in task.run
+        assert "learning_rate=0.0001" in task.run
+
+    def test_gpt_oss_uses_model_as_size(self) -> None:
+        """For GPT-OSS workflows the model argument is the size."""
+        task = build_task("gpt-oss-full", model="120b", dataset="tatsu-lab/alpaca")
+
+        assert _resources(task).accelerators == {"H100": 8}
+        assert task.num_nodes == 4
+
+    def test_gpt_oss_rejects_unknown_size(self) -> None:
+        """Unknown sizes are rejected rather than replaced with a default."""
+        with pytest.raises(ValidationError, match="Invalid model size"):
+            build_task("gpt-oss-lora", model="70b", dataset="tatsu-lab/alpaca")
+
+    def test_unknown_workflow(self) -> None:
+        """Unknown workflows raise ValidationError."""
+        with pytest.raises(ValidationError, match="Unknown workflow"):
+            build_task("nope", model="m", dataset="d")

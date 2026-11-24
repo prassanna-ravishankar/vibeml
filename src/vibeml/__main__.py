@@ -15,14 +15,15 @@ def server() -> None:
     """Start the VibeML MCP server."""
     from .server import run_server
 
-    click.echo("Starting VibeML MCP Server...")
-    click.echo("Use this server with Claude or other MCP-compatible AI assistants")
-    click.echo("Press Ctrl+C to stop the server")
+    # Stdout carries the MCP protocol; human-facing messages go to stderr.
+    click.echo("Starting VibeML MCP Server...", err=True)
+    click.echo("Use this server with Claude or other MCP-compatible AI assistants", err=True)
+    click.echo("Press Ctrl+C to stop the server", err=True)
 
     try:
         run_server()
     except KeyboardInterrupt:
-        click.echo("\nServer stopped.")
+        click.echo("\nServer stopped.", err=True)
 
 
 @cli.command()

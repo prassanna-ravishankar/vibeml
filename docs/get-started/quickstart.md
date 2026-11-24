@@ -176,8 +176,8 @@ sequenceDiagram
 !!! info "How Job State Works"
     VibeML **does not maintain its own job database**. Instead:
 
-    - **SkyPilot** maintains job state in `~/.sky/state.json`
-    - **VibeML** queries SkyPilot's state via Python API (`sky.status()`, `sky.jobs()`)
+    - **SkyPilot's API server** owns cluster and job state
+    - **VibeML** queries it through SkyPilot's client SDK (`sky.status()`)
     - Jobs persist across VibeML server restarts (SkyPilot is authoritative)
     - You can use `sky` CLI commands directly anytime
 
