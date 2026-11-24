@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 import sky
+from sky.skylet.autostop_lib import AutostopWaitFor
 
 from ..exceptions import SkyPilotError
 from ..models import JobStatus
@@ -132,7 +133,9 @@ async def list_clusters(prefix: str) -> list[ClusterInfo]:
     )
 
 
-async def launch(task: sky.Task, cluster_name: str) -> str:
+async def launch(
+    task: sky.Task, cluster_name: str, max_minutes: int | None = None
+) -> str:
     """Submit a launch request without waiting for it to finish.
 
     Provisioning and setup take minutes; the returned request ID can be
@@ -141,11 +144,21 @@ async def launch(task: sky.Task, cluster_name: str) -> str:
     Args:
         task: Task to run.
         cluster_name: Name for the new cluster.
+        max_minutes: Hard runtime cap. The cluster is torn down this many
+            minutes after autostop is armed, whether or not jobs are still
+            running (SkyPilot autostop with ``wait_for=NONE`` and ``down``).
 
     Returns:
         The launch request ID.
     """
-    request_id = await _call(lambda: sky.launch(task, cluster_name=cluster_name))
+    cap: dict[str, Any] = {}
+    if max_minutes is not None:
+        cap = {
+            "idle_minutes_to_autostop": max_minutes,
+            "down": True,
+            "wait_for": AutostopWaitFor.NONE,
+        }
+    request_id = await _call(lambda: sky.launch(task, cluster_name=cluster_name, **cap))
     return str(request_id)
 
 

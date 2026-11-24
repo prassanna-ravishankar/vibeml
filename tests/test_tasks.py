@@ -8,6 +8,7 @@ import sky
 
 from vibeml.exceptions import ValidationError
 from vibeml.tasks import (
+    OUTPUTS_DIR,
     WORKFLOWS,
     build_task,
     create_gpt_oss_full_task,
@@ -224,6 +225,63 @@ def test_tasks_run_on_nebius_eu_north1() -> None:
     ):
         assert str(_resources(task).cloud) == "Nebius"
         assert _resources(task).region == "eu-north1"
+
+
+CHECKPOINT_WRITERS = [
+    (create_unsloth_task, {"model": "org/model", "dataset": "d"}),
+    (create_gpt_oss_lora_task, {"model_size": "20b"}),
+]
+
+
+class TestOutputs:
+    """Checkpoints are written where the bucket is mounted."""
+
+    @pytest.mark.parametrize(("create", "kwargs"), CHECKPOINT_WRITERS)
+    def test_checkpoints_land_in_the_mounted_bucket(
+        self, create: Callable[..., sky.Task], kwargs: dict[str, Any]
+    ) -> None:
+        """The run script saves the final model under the mount point."""
+        task = create(cloud_bucket="ckpts", **kwargs)
+
+        (mount,) = task.storage_mounts
+        assert mount == OUTPUTS_DIR
+        assert f"'{mount}/final_model'" in _run(task)
+
+    @pytest.mark.parametrize(("create", "kwargs"), CHECKPOINT_WRITERS)
+    def test_custom_output_dir_moves_the_mount(
+        self, create: Callable[..., sky.Task], kwargs: dict[str, Any]
+    ) -> None:
+        """A custom output_dir is both the mount point and the save path."""
+        task = create(cloud_bucket="ckpts", output_dir="/ckpt", **kwargs)
+
+        assert set(task.storage_mounts) == {"/ckpt"}
+        assert "'/ckpt/final_model'" in _run(task)
+
+    @pytest.mark.parametrize(
+        ("create", "kwargs"),
+        [*CHECKPOINT_WRITERS, (create_gpt_oss_full_task, {"model_size": "20b"})],
+    )
+    def test_relative_output_dir_rejected(
+        self, create: Callable[..., sky.Task], kwargs: dict[str, Any]
+    ) -> None:
+        """A relative path cannot be a mount point, so it is refused."""
+        with pytest.raises(ValidationError, match="absolute"):
+            create(output_dir="./outputs", **kwargs)
+
+    def test_without_bucket_setup_creates_output_dir(self) -> None:
+        """Without a mount, setup creates the output directory for the job."""
+        task = create_unsloth_task(model="org/model", dataset="d")
+
+        assert not task.storage_mounts
+        assert f"mkdir -p {OUTPUTS_DIR}" in str(task.setup)
+
+    def test_build_task_forwards_bucket_for_gpt_oss(self) -> None:
+        """build_task passes cloud_bucket to every workflow."""
+        task = build_task(
+            "gpt-oss-lora", model="20b", dataset="d", cloud_bucket="ckpts"
+        )
+
+        assert task.storage_mounts[OUTPUTS_DIR].name == "ckpts"
 
 
 class TestBuildTask:

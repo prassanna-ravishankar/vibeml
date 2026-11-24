@@ -10,6 +10,10 @@ from .exceptions import TaskGenerationError, ValidationError
 
 NEBIUS_INFRA = "nebius/eu-north1"
 
+# Where training writes checkpoints and final models, and where a cloud bucket
+# is mounted. One path for both, so outputs always land in the bucket.
+OUTPUTS_DIR = "/outputs"
+
 
 @dataclass(frozen=True)
 class Compute:
@@ -35,21 +39,31 @@ def _nebius_task(
     compute: Compute,
     *,
     use_spot: bool,
+    output_dir: str,
     cloud_bucket: str | None,
 ) -> sky.Task:
-    """Build a task on Nebius, mounting ``cloud_bucket`` at /outputs if given.
+    """Build a task on Nebius whose outputs go to ``output_dir``.
+
+    With ``cloud_bucket``, the bucket is mounted at ``output_dir``, which is
+    where the run script writes. Without one, setup creates the directory.
 
     Args:
         name: Task name.
         setup: Setup script.
-        run: Run script.
+        run: Run script, which writes its outputs under ``output_dir``.
         compute: GPU resources.
         use_spot: Whether to use spot instances.
-        cloud_bucket: Bucket to mount at /outputs, if any.
+        output_dir: Absolute path the run script writes outputs to.
+        cloud_bucket: Bucket to mount at ``output_dir``, if any.
 
     Returns:
         The configured task.
     """
+    if not cloud_bucket:
+        setup = (
+            f'sudo mkdir -p {output_dir} && sudo chown "$(id -u):$(id -g)" {output_dir}\n'
+            + setup
+        )
     task = sky.Task(
         name=name,
         setup=setup,
@@ -64,9 +78,24 @@ def _nebius_task(
     )
     if cloud_bucket:
         task.set_storage_mounts(
-            {"/outputs": sky.Storage(name=cloud_bucket, mode=sky.StorageMode.MOUNT)}
+            {output_dir: sky.Storage(name=cloud_bucket, mode=sky.StorageMode.MOUNT)}
         )
     return task
+
+
+def _check_output_dir(output_dir: str) -> None:
+    """Require an absolute output directory, since it is also a mount point.
+
+    Args:
+        output_dir: Directory the run script writes outputs to.
+
+    Raises:
+        ValidationError: If the path is relative.
+    """
+    if not output_dir.startswith("/"):
+        raise ValidationError(
+            f"output_dir must be an absolute path (it is also the bucket mount point), got {output_dir!r}"
+        )
 
 
 def create_unsloth_task(
@@ -77,7 +106,7 @@ def create_unsloth_task(
     lora_r: int = 16,
     max_steps: int = 60,
     learning_rate: float = 2e-4,
-    output_dir: str = "./outputs",
+    output_dir: str = OUTPUTS_DIR,
     cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for Unsloth fine-tuning on Nebius.
@@ -92,7 +121,7 @@ def create_unsloth_task(
         lora_r: LoRA rank parameter
         max_steps: Maximum training steps
         learning_rate: Learning rate for training
-        output_dir: Directory for saving outputs
+        output_dir: Absolute directory for outputs; the bucket mount point
         cloud_bucket: Optional cloud bucket for checkpoints
 
     Returns:
@@ -103,6 +132,7 @@ def create_unsloth_task(
         TaskGenerationError: If task generation fails
     """
     # Validate inputs
+    _check_output_dir(output_dir)
     if not model or "/" not in model:
         raise ValidationError(
             f"Invalid model format: {model}. Expected format: 'org/model'"
@@ -214,6 +244,7 @@ print('Training complete!')
             run_script,
             compute,
             use_spot=True,
+            output_dir=output_dir,
             cloud_bucket=cloud_bucket,
         )
 
@@ -224,7 +255,7 @@ print('Training complete!')
 def create_gpt_oss_lora_task(
     model_size: str = "20b",
     dataset: str = "tatsu-lab/alpaca",
-    output_dir: str = "./outputs",
+    output_dir: str = OUTPUTS_DIR,
     cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for GPT-OSS LoRA fine-tuning on Nebius.
@@ -234,7 +265,7 @@ def create_gpt_oss_lora_task(
     Args:
         model_size: Model size - "20b" or "120b"
         dataset: HuggingFace dataset ID
-        output_dir: Directory for saving outputs
+        output_dir: Absolute directory for outputs; the bucket mount point
         cloud_bucket: Optional cloud bucket for checkpoints
 
     Returns:
@@ -253,6 +284,7 @@ def create_gpt_oss_lora_task(
         ),
     }
 
+    _check_output_dir(output_dir)
     if model_size not in model_configs:
         raise ValidationError(
             f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}"
@@ -343,6 +375,7 @@ print('Training complete!')
             run_script,
             config.compute,
             use_spot=True,
+            output_dir=output_dir,
             cloud_bucket=cloud_bucket,
         )
 
@@ -353,7 +386,7 @@ print('Training complete!')
 def create_gpt_oss_full_task(
     model_size: str = "20b",
     dataset: str = "tatsu-lab/alpaca",
-    output_dir: str = "./outputs",
+    output_dir: str = OUTPUTS_DIR,
     cloud_bucket: str | None = None,
 ) -> sky.Task:
     """Generate SkyPilot Task for GPT-OSS full fine-tuning on Nebius.
@@ -361,7 +394,7 @@ def create_gpt_oss_full_task(
     Args:
         model_size: Model size - "20b" or "120b"
         dataset: HuggingFace dataset ID
-        output_dir: Directory for saving outputs
+        output_dir: Absolute directory for outputs; the bucket mount point
         cloud_bucket: Optional cloud bucket for checkpoints
 
     Returns:
@@ -380,6 +413,7 @@ def create_gpt_oss_full_task(
         ),
     }
 
+    _check_output_dir(output_dir)
     if model_size not in model_configs:
         raise ValidationError(
             f"Invalid model size: {model_size}. Choose from {list(model_configs.keys())}"
@@ -408,6 +442,7 @@ echo "Would require DeepSpeed/FSDP configuration for production use"
             run_script,
             config.compute,
             use_spot=False,  # Full fine-tuning needs stable instances
+            output_dir=output_dir,
             cloud_bucket=cloud_bucket,
         )
 
@@ -474,5 +509,5 @@ def build_task(
         return create(
             model=model, dataset=dataset, gpu_type=gpu_type or "L40S", **given
         )
-    output_dir = {"output_dir": given["output_dir"]} if "output_dir" in given else {}
-    return create(model_size=model, dataset=dataset, **output_dir)
+    shared = {k: given[k] for k in ("output_dir", "cloud_bucket") if k in given}
+    return create(model_size=model, dataset=dataset, **shared)

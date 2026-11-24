@@ -107,6 +107,19 @@ SkyPilot cluster statuses map as follows. Every `sky.ClusterStatus` member must 
 
 Torn-down clusters disappear from SkyPilot's status, so `get_training_status` reports them as not found.
 
+## Outputs and Storage
+
+`tasks.OUTPUTS_DIR` (`/outputs`) is the single path where training writes checkpoints and final models. With a `cloud_bucket`, the bucket is mounted at that same path, so outputs land in the bucket. A custom `output_dir` moves both together, and must be absolute because it is a mount point. Without a bucket, setup creates the directory on the cluster, and outputs are lost when the cluster is torn down.
+
+## Cost Guard
+
+`launch_training(max_cost=...)` enforces the budget in two places:
+
+1. **Before launch**: the task's real resources are priced for `estimated_hours` (`CostEstimator.estimate_task`). If the expected cost exceeds `max_cost`, the tool returns `over_budget` and nothing is submitted.
+2. **During the run**: the budget is converted into runtime (`CostEstimator.affordable_minutes`, the budget divided by the hourly rate). The cluster is launched with SkyPilot autostop set to that many minutes, `wait_for=NONE` and `down=True`, so it is torn down when the budget's runtime is up, even if training is still running.
+
+The cap is approximate: prices are vibeml's Nebius estimates (spot discount included), and time spent provisioning before autostop is armed is not counted.
+
 ## Request Flow
 
 ```

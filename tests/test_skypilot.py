@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import sky
 from sky.schemas.api.responses import StatusResponse
+from sky.skylet.autostop_lib import AutostopWaitFor
 
 from vibeml.cloud import skypilot
 from vibeml.cloud.skypilot import ClusterInfo, to_job_status
@@ -176,6 +177,22 @@ class TestLaunch:
         sdk.launch.assert_called_once_with(task, cluster_name="vibeml-a")
         sdk.get.assert_not_called()
         assert request_id == "req-launch"
+
+    async def test_runtime_cap_becomes_unconditional_autostop(
+        self, sdk: MagicMock
+    ) -> None:
+        """A runtime cap tears the cluster down after that many minutes, jobs or not."""
+        task = sky.Task(run="echo hi")
+
+        await skypilot.launch(task, cluster_name="vibeml-a", max_minutes=120)
+
+        sdk.launch.assert_called_once_with(
+            task,
+            cluster_name="vibeml-a",
+            idle_minutes_to_autostop=120,
+            down=True,
+            wait_for=AutostopWaitFor.NONE,
+        )
 
     async def test_submit_failure_raises(self, sdk: MagicMock) -> None:
         """A rejected submission surfaces as SkyPilotError."""

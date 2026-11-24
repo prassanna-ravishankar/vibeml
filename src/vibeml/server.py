@@ -25,6 +25,7 @@ from .tasks import WORKFLOWS, build_task
 logger = logging.getLogger(__name__)
 
 CLUSTER_PREFIX = "vibeml-"
+Hours = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 ACTIVE_STATUSES = {JobStatus.PENDING, JobStatus.RUNNING}
 
 mcp = FastMCP(
@@ -59,11 +60,18 @@ async def launch_training(
     lora_r: int | None = None,
     max_seq_length: int | None = None,
     output_dir: str | None = None,
+    cloud_bucket: str | None = None,
+    estimated_hours: Hours = 4.0,
 ) -> dict[str, Any]:
     """Launch a model training job on Nebius Cloud.
 
     The launch is submitted and this tool returns immediately; provisioning
     takes several minutes. Follow it with ``get_training_status``.
+
+    With ``max_cost``, the launch is refused if the cost estimate for
+    ``estimated_hours`` exceeds it. Otherwise the cluster is torn down once
+    the budget's worth of runtime has elapsed, even if training is still
+    running.
 
     Args:
         workflow: Training workflow type (unsloth, gpt-oss-lora, gpt-oss-full)
@@ -71,14 +79,17 @@ async def launch_training(
         dataset: HuggingFace dataset ID
         gpu_type: GPU type (L40S, RTX4090, H100, A100) for Unsloth
         max_steps: Maximum training steps
-        max_cost: Maximum cost limit in USD
+        max_cost: Budget in USD, enforced before and during the run
         learning_rate: Learning rate for training
         lora_r: LoRA rank parameter
         max_seq_length: Maximum sequence length
-        output_dir: Output directory for results
+        output_dir: Absolute output directory (default /outputs)
+        cloud_bucket: Bucket to mount at the output directory, so checkpoints persist
+        estimated_hours: Expected training time, used to check max_cost
 
     Returns:
-        Dict with cluster_id, the launch request ID, and how to follow it
+        Dict with cluster_id, the launch request ID, how to follow it, and
+        the cost guard if max_cost was given
     """
     hyperparameters = {
         "max_steps": max_steps,
@@ -96,22 +107,46 @@ async def launch_training(
             max_cost=max_cost,
             hyperparameters={k: v for k, v in hyperparameters.items() if v is not None},
         )
-        task = build_task(workflow, model, dataset, gpu_type, **hyperparameters)
+        task = build_task(
+            workflow,
+            model,
+            dataset,
+            gpu_type,
+            cloud_bucket=cloud_bucket,
+            **hyperparameters,
+        )
     except (PydanticValidationError, ValidationError) as e:
         return _error("validation_error", str(e))
     except TaskGenerationError as e:
         return _error("task_generation_error", str(e))
 
+    max_minutes = None
+    if max_cost is not None:
+        estimator = CostEstimator()
+        expected = estimator.estimate_task(task, estimated_hours).estimate.expected_cost
+        if expected > max_cost:
+            return {
+                **_error(
+                    "over_budget",
+                    f"Estimated ${expected:.2f} for {estimated_hours}h exceeds "
+                    f"max_cost ${max_cost:.2f}; not launched.",
+                ),
+                "estimated_cost": expected,
+            }
+        max_minutes = estimator.affordable_minutes(task, max_cost)
+
     cluster_id = f"{CLUSTER_PREFIX}{workflow}-{uuid.uuid4().hex[:8]}"
     try:
-        request_id = await skypilot.launch(task, cluster_name=cluster_id)
+        request_id = await skypilot.launch(
+            task, cluster_name=cluster_id, max_minutes=max_minutes
+        )
     except SkyPilotError as e:
         return _error("skypilot_error", str(e))
 
     logger.info(
         "Submitted %s launch for %s (request %s)", workflow, cluster_id, request_id
     )
-    return {
+    result: dict[str, Any] = {
         "status": "submitted",
         "cluster_id": cluster_id,
         "launch_request_id": request_id,
@@ -120,6 +155,12 @@ async def launch_training(
         "dataset": request.dataset,
         "logs_command": f"sky api logs {request_id}",
     }
+    if max_minutes is not None:
+        result["cost_guard"] = {
+            "max_cost": max_cost,
+            "teardown_after_minutes": max_minutes,
+        }
+    return result
 
 
 @mcp.tool()
@@ -239,7 +280,7 @@ async def estimate_training_cost(
     model: str = "mistralai/Mistral-7B-v0.1",
     dataset: str = "tatsu-lab/alpaca",
     gpu_type: str | None = None,
-    estimated_hours: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 4.0,
+    estimated_hours: Hours = 4.0,
 ) -> dict[str, Any]:
     """Estimate the cost of a training job before launching.
 
@@ -262,20 +303,13 @@ async def estimate_training_cost(
     except TaskGenerationError as e:
         return _error("task_generation_error", str(e))
 
-    (resources,) = task.resources
-    ((gpu, per_node),) = resources.accelerators.items()
-    gpu_count = int(per_node) * task.num_nodes
-    estimate = CostEstimator().estimate_cost(
-        gpu_type=gpu,
-        estimated_hours=estimated_hours,
-        gpu_count=gpu_count,
-        use_spot=resources.use_spot,
-    )
+    cost = CostEstimator().estimate_task(task, estimated_hours)
+    estimate = cost.estimate
     return {
         "workflow": workflow,
-        "gpu_type": gpu,
-        "gpu_count": gpu_count,
-        "use_spot": resources.use_spot,
+        "gpu_type": cost.gpu_type,
+        "gpu_count": cost.gpu_count,
+        "use_spot": cost.use_spot,
         "estimated_hours": estimated_hours,
         "hourly_cost": estimate.hourly_rate,
         "expected_cost": estimate.expected_cost,

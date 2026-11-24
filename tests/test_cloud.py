@@ -1,7 +1,10 @@
 """Tests for cloud integration."""
 
+import pytest
+
 from vibeml.cloud import CostEstimator
 from vibeml.models import CostEstimate
+from vibeml.tasks import create_gpt_oss_full_task, create_unsloth_task
 
 
 class TestCostEstimator:
@@ -84,3 +87,26 @@ class TestCostEstimator:
         long = estimator.estimate_duration(model_size="7b", max_steps=2000)
 
         assert long > short
+
+
+class TestTaskPricing:
+    """Pricing a task uses exactly the resources it requests."""
+
+    def test_estimate_task_counts_every_gpu_on_every_node(self) -> None:
+        """Full 120B training is 4 nodes of 8 on-demand H100s."""
+        cost = CostEstimator().estimate_task(create_gpt_oss_full_task("120b"), hours=1)
+
+        assert (cost.gpu_type, cost.gpu_count, cost.use_spot) == ("H100", 32, False)
+        assert cost.estimate.expected_cost == pytest.approx(3.5 * 32)
+
+    def test_affordable_minutes(self) -> None:
+        """A budget buys budget / hourly rate of runtime, rounded down."""
+        task = create_unsloth_task(model="org/model", dataset="d")  # 1 spot L40S
+
+        assert CostEstimator().affordable_minutes(task, max_cost=4.2) == 300
+
+    def test_zero_budget_buys_nothing(self) -> None:
+        """A zero budget affords no runtime."""
+        task = create_unsloth_task(model="org/model", dataset="d")
+
+        assert CostEstimator().affordable_minutes(task, max_cost=0) == 0
