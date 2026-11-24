@@ -122,13 +122,16 @@ class ModelValidator:
             Estimated GPU memory in GB
         """
         # Get model size
+        size: str | None
         if model_id in self.MODEL_SIZE_MEMORY_MAP:
             size = model_id
         else:
             size = self._estimate_model_size(model_id)
 
         # Get base memory requirement
-        base_memory = self.MODEL_SIZE_MEMORY_MAP.get(size, 32)  # Default 32GB
+        base_memory: float = (
+            self.MODEL_SIZE_MEMORY_MAP.get(size, 32) if size else 32
+        )  # Default 32GB
 
         # Apply quantization reduction (4-bit = ~4x reduction)
         if use_quantization:

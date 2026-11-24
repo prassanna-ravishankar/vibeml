@@ -3,7 +3,10 @@
 import time
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, ClassVar
+from typing import Any, ClassVar, ParamSpec, TypeVar
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class VibeMLError(Exception):
@@ -239,8 +242,8 @@ def retry_with_backoff(
     max_retries: int = 3,
     initial_delay: float = 1.0,
     backoff_factor: float = 2.0,
-    exceptions: tuple = (Exception,),
-) -> Callable:
+    exceptions: tuple[type[Exception], ...] = (Exception,),
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorator for retrying functions with exponential backoff.
 
     Args:
@@ -253,27 +256,24 @@ def retry_with_backoff(
         Decorated function with retry logic
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             delay = initial_delay
-
-            for attempt in range(max_retries + 1):
+            for _ in range(max_retries):
                 try:
                     return func(*args, **kwargs)
-                except exceptions as e:
-                    if attempt < max_retries:
-                        time.sleep(delay)
-                        delay *= backoff_factor
-                    else:
-                        # Final attempt failed
-                        raise SkyPilotError(
-                            f"Operation failed after {max_retries} retries",
-                            technical_details=str(e),
-                            recovery_suggestion="Check cloud provider status or try a different region",
-                        ) from e
-
-            return None  # Should never reach here
+                except exceptions:
+                    time.sleep(delay)
+                    delay *= backoff_factor
+            try:
+                return func(*args, **kwargs)
+            except exceptions as e:
+                raise SkyPilotError(
+                    f"Operation failed after {max_retries} retries",
+                    technical_details=str(e),
+                    recovery_suggestion="Check cloud provider status or try a different region",
+                ) from e
 
         return wrapper
 

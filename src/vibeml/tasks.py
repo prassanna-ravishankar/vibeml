@@ -1,11 +1,72 @@
 """Task generation functions for different training workflows."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import sky
 
 from .exceptions import TaskGenerationError, ValidationError
+
+NEBIUS_INFRA = "nebius/eu-north1"
+
+
+@dataclass(frozen=True)
+class Compute:
+    """GPU resources a workflow configuration runs on."""
+
+    accelerators: str
+    disk_size: int
+    num_nodes: int = 1
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    """A model and the compute it trains on."""
+
+    model: str
+    compute: Compute
+
+
+def _nebius_task(
+    name: str,
+    setup: str,
+    run: str,
+    compute: Compute,
+    *,
+    use_spot: bool,
+    cloud_bucket: str | None,
+) -> sky.Task:
+    """Build a task on Nebius, mounting ``cloud_bucket`` at /outputs if given.
+
+    Args:
+        name: Task name.
+        setup: Setup script.
+        run: Run script.
+        compute: GPU resources.
+        use_spot: Whether to use spot instances.
+        cloud_bucket: Bucket to mount at /outputs, if any.
+
+    Returns:
+        The configured task.
+    """
+    task = sky.Task(
+        name=name,
+        setup=setup,
+        run=run,
+        num_nodes=compute.num_nodes,
+        resources=sky.Resources(
+            infra=NEBIUS_INFRA,
+            accelerators=compute.accelerators,
+            disk_size=compute.disk_size,
+            use_spot=use_spot,
+        ),
+    )
+    if cloud_bucket:
+        task.set_storage_mounts(
+            {"/outputs": sky.Storage(name=cloud_bucket, mode=sky.StorageMode.MOUNT)}
+        )
+    return task
 
 
 def create_unsloth_task(
@@ -52,10 +113,10 @@ def create_unsloth_task(
 
     # Map GPU types to Nebius-specific configurations
     gpu_configs = {
-        "L40S": {"accelerators": "L40S:1", "disk_size": 100},
-        "RTX4090": {"accelerators": "RTX4090:1", "disk_size": 100},
-        "H100": {"accelerators": "H100:1", "disk_size": 200},
-        "A100": {"accelerators": "A100:1", "disk_size": 150},
+        "L40S": Compute("L40S:1", disk_size=100),
+        "RTX4090": Compute("RTX4090:1", disk_size=100),
+        "H100": Compute("H100:1", disk_size=200),
+        "A100": Compute("A100:1", disk_size=150),
     }
 
     if gpu_type not in gpu_configs:
@@ -63,7 +124,7 @@ def create_unsloth_task(
             f"Unsupported GPU type: {gpu_type}. Choose from {list(gpu_configs.keys())}"
         )
 
-    config = gpu_configs[gpu_type]
+    compute = gpu_configs[gpu_type]
 
     # Setup script - installs Unsloth with correct CUDA version
     setup_script = """
@@ -146,29 +207,15 @@ print('Training complete!')
 "
 """
 
-    # Build file mounts if cloud bucket specified
-    file_mounts = {}
-    if cloud_bucket:
-        file_mounts["/outputs"] = {"name": cloud_bucket, "mode": "MOUNT"}
-
     try:
-        task = sky.Task(
-            name=f"vibeml-unsloth-{model.replace('/', '-')}",
-            setup=setup_script,
-            run=run_script,
-            resources=sky.Resources(
-                cloud="nebius",
-                region="eu-north1",
-                accelerators=config["accelerators"],
-                disk_size=config["disk_size"],
-                use_spot=True,
-            ),
+        return _nebius_task(
+            f"vibeml-unsloth-{model.replace('/', '-')}",
+            setup_script,
+            run_script,
+            compute,
+            use_spot=True,
+            cloud_bucket=cloud_bucket,
         )
-
-        if file_mounts:
-            task.file_mounts = file_mounts
-
-        return task
 
     except Exception as e:
         raise TaskGenerationError(f"Failed to create Unsloth task: {e!s}") from e
@@ -199,16 +246,11 @@ def create_gpt_oss_lora_task(
     """
     # Model configurations for LoRA
     model_configs = {
-        "20b": {
-            "model": "EleutherAI/gpt-neox-20b",
-            "accelerators": "H100:2",
-            "disk_size": 200,
-        },
-        "120b": {
-            "model": "EleutherAI/gpt-neox-120b",  # Placeholder
-            "accelerators": "H100:8",
-            "disk_size": 500,
-        },
+        "20b": ModelConfig("EleutherAI/gpt-neox-20b", Compute("H100:2", disk_size=200)),
+        "120b": ModelConfig(
+            "EleutherAI/gpt-neox-120b",  # Placeholder
+            Compute("H100:8", disk_size=500),
+        ),
     }
 
     if model_size not in model_configs:
@@ -232,15 +274,15 @@ from peft import LoraConfig, get_peft_model, TaskType
 from datasets import load_dataset
 from trl import SFTTrainer
 
-print('Loading model: {config["model"]}')
+print('Loading model: {config.model}')
 model = AutoModelForCausalLM.from_pretrained(
-    '{config["model"]}',
+    '{config.model}',
     torch_dtype=torch.bfloat16,
     device_map='auto',
     trust_remote_code=True,
 )
 
-tokenizer = AutoTokenizer.from_pretrained('{config["model"]}')
+tokenizer = AutoTokenizer.from_pretrained('{config.model}')
 tokenizer.pad_token = tokenizer.eos_token
 
 print('Configuring LoRA')
@@ -294,28 +336,15 @@ print('Training complete!')
 "
 """
 
-    file_mounts = {}
-    if cloud_bucket:
-        file_mounts["/outputs"] = {"name": cloud_bucket, "mode": "MOUNT"}
-
     try:
-        task = sky.Task(
-            name=f"vibeml-gpt-oss-lora-{model_size}",
-            setup=setup_script,
-            run=run_script,
-            resources=sky.Resources(
-                cloud="nebius",
-                region="eu-north1",
-                accelerators=config["accelerators"],
-                disk_size=config["disk_size"],
-                use_spot=True,
-            ),
+        return _nebius_task(
+            f"vibeml-gpt-oss-lora-{model_size}",
+            setup_script,
+            run_script,
+            config.compute,
+            use_spot=True,
+            cloud_bucket=cloud_bucket,
         )
-
-        if file_mounts:
-            task.file_mounts = file_mounts
-
-        return task
 
     except Exception as e:
         raise TaskGenerationError(f"Failed to create GPT-OSS LoRA task: {e!s}") from e
@@ -344,18 +373,11 @@ def create_gpt_oss_full_task(
     """
     # Model configurations for full fine-tuning
     model_configs = {
-        "20b": {
-            "model": "EleutherAI/gpt-neox-20b",
-            "accelerators": "H100:8",
-            "disk_size": 500,
-            "num_nodes": 1,
-        },
-        "120b": {
-            "model": "EleutherAI/gpt-neox-120b",  # Placeholder
-            "accelerators": "H100:8",
-            "disk_size": 1000,
-            "num_nodes": 4,
-        },
+        "20b": ModelConfig("EleutherAI/gpt-neox-20b", Compute("H100:8", disk_size=500)),
+        "120b": ModelConfig(
+            "EleutherAI/gpt-neox-120b",  # Placeholder
+            Compute("H100:8", disk_size=1000, num_nodes=4),
+        ),
     }
 
     if model_size not in model_configs:
@@ -374,29 +396,20 @@ pip install flash-attn --no-build-isolation
 """
 
     run_script = f"""
-echo "Full fine-tuning for {config["model"]} - requires distributed setup"
+echo "Full fine-tuning for {config.model} - requires distributed setup"
 echo "This is a placeholder for full fine-tuning implementation"
 echo "Would require DeepSpeed/FSDP configuration for production use"
 """
 
     try:
-        resources = sky.Resources(
-            cloud="nebius",
-            region="eu-north1",
-            accelerators=config["accelerators"],
-            disk_size=config["disk_size"],
+        return _nebius_task(
+            f"vibeml-gpt-oss-full-{model_size}",
+            setup_script,
+            run_script,
+            config.compute,
             use_spot=False,  # Full fine-tuning needs stable instances
+            cloud_bucket=cloud_bucket,
         )
-
-        task = sky.Task(
-            name=f"vibeml-gpt-oss-full-{model_size}",
-            setup=setup_script,
-            run=run_script,
-            resources=resources,
-            num_nodes=config.get("num_nodes", 1),
-        )
-
-        return task
 
     except Exception as e:
         raise TaskGenerationError(f"Failed to create GPT-OSS full task: {e!s}") from e

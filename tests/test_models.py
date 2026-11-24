@@ -55,7 +55,7 @@ class TestCostEstimate:
             expected_cost=10.0,
         )
         with pytest.raises(ValidationError):
-            estimate.hourly_rate = 3.0  # type: ignore[misc]
+            estimate.hourly_rate = 3.0
 
     def test_invalid_hourly_rate(self) -> None:
         """Test validation of hourly rate."""

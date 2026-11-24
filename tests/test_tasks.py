@@ -1,5 +1,8 @@
 """Tests for task generation functions."""
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 import sky
 
@@ -14,6 +17,12 @@ from vibeml.tasks import (
 )
 
 
+def _run(task: sky.Task) -> str:
+    """Return a task's run script."""
+    assert isinstance(task.run, str)
+    return task.run
+
+
 def _resources(task: sky.Task) -> sky.Resources:
     """Return the single Resources entry of a task."""
     (resources,) = task.resources
@@ -23,7 +32,7 @@ def _resources(task: sky.Task) -> sky.Resources:
 class TestUnslothTask:
     """Test Unsloth task generation."""
 
-    def test_create_unsloth_task_basic(self):
+    def test_create_unsloth_task_basic(self) -> None:
         """Test basic Unsloth task creation."""
         task = create_unsloth_task(
             model="mistralai/Mistral-7B-v0.1",
@@ -32,12 +41,12 @@ class TestUnslothTask:
         )
 
         assert isinstance(task, sky.Task)
-        assert "vibeml-unsloth" in task.name
-        assert str(_resources(task).cloud) == "nebius"
+        assert "vibeml-unsloth" in str(task.name)
+        assert str(_resources(task).cloud) == "Nebius"
         assert _resources(task).accelerators == {"L40S": 1}
         assert _resources(task).use_spot is True
 
-    def test_create_unsloth_task_with_custom_params(self):
+    def test_create_unsloth_task_with_custom_params(self) -> None:
         """Test Unsloth task with custom parameters."""
         task = create_unsloth_task(
             model="meta-llama/Llama-3.2-1B",
@@ -49,11 +58,11 @@ class TestUnslothTask:
         )
 
         assert _resources(task).accelerators == {"H100": 1}
-        assert "max_steps=100" in task.run
-        assert "learning_rate=0.0001" in task.run
-        assert "r=32" in task.run
+        assert "max_steps=100" in _run(task)
+        assert "learning_rate=0.0001" in _run(task)
+        assert "r=32" in _run(task)
 
-    def test_create_unsloth_task_invalid_model(self):
+    def test_create_unsloth_task_invalid_model(self) -> None:
         """Test Unsloth task with invalid model format."""
         with pytest.raises(ValidationError) as exc_info:
             create_unsloth_task(
@@ -62,7 +71,7 @@ class TestUnslothTask:
             )
         assert "Invalid model format" in str(exc_info.value)
 
-    def test_create_unsloth_task_invalid_gpu(self):
+    def test_create_unsloth_task_invalid_gpu(self) -> None:
         """Test Unsloth task with unsupported GPU."""
         with pytest.raises(ValidationError) as exc_info:
             create_unsloth_task(
@@ -72,7 +81,7 @@ class TestUnslothTask:
             )
         assert "Unsupported GPU type" in str(exc_info.value)
 
-    def test_create_unsloth_task_empty_dataset(self):
+    def test_create_unsloth_task_empty_dataset(self) -> None:
         """Test Unsloth task with empty dataset."""
         with pytest.raises(ValidationError) as exc_info:
             create_unsloth_task(
@@ -81,23 +90,23 @@ class TestUnslothTask:
             )
         assert "Dataset cannot be empty" in str(exc_info.value)
 
-    def test_create_unsloth_task_with_cloud_bucket(self):
-        """Test Unsloth task with cloud bucket for checkpoints."""
+    def test_create_unsloth_task_with_cloud_bucket(self) -> None:
+        """A cloud bucket is mounted as SkyPilot storage at /outputs."""
         task = create_unsloth_task(
             model="mistralai/Mistral-7B-v0.1",
             dataset="tatsu-lab/alpaca",
             cloud_bucket="my-training-bucket",
         )
 
-        assert task.file_mounts is not None
-        assert "/outputs" in task.file_mounts
-        assert task.file_mounts["/outputs"]["name"] == "my-training-bucket"
+        storage = task.storage_mounts["/outputs"]
+        assert storage.name == "my-training-bucket"
+        assert storage.mode == sky.StorageMode.MOUNT
 
 
 class TestGPTOSSLoRATask:
     """Test GPT-OSS LoRA task generation."""
 
-    def test_create_gpt_oss_lora_20b(self):
+    def test_create_gpt_oss_lora_20b(self) -> None:
         """Test GPT-OSS LoRA task for 20B model."""
         task = create_gpt_oss_lora_task(
             model_size="20b",
@@ -105,12 +114,12 @@ class TestGPTOSSLoRATask:
         )
 
         assert isinstance(task, sky.Task)
-        assert "vibeml-gpt-oss-lora-20b" in task.name
-        assert str(_resources(task).cloud) == "nebius"
+        assert task.name == "vibeml-gpt-oss-lora-20b"
+        assert str(_resources(task).cloud) == "Nebius"
         assert _resources(task).accelerators == {"H100": 2}
         assert _resources(task).disk_size == 200
 
-    def test_create_gpt_oss_lora_120b(self):
+    def test_create_gpt_oss_lora_120b(self) -> None:
         """Test GPT-OSS LoRA task for 120B model."""
         task = create_gpt_oss_lora_task(
             model_size="120b",
@@ -120,7 +129,7 @@ class TestGPTOSSLoRATask:
         assert _resources(task).accelerators == {"H100": 8}
         assert _resources(task).disk_size == 500
 
-    def test_create_gpt_oss_lora_invalid_size(self):
+    def test_create_gpt_oss_lora_invalid_size(self) -> None:
         """Test GPT-OSS LoRA task with invalid model size."""
         with pytest.raises(ValidationError) as exc_info:
             create_gpt_oss_lora_task(
@@ -133,7 +142,7 @@ class TestGPTOSSLoRATask:
 class TestGPTOSSFullTask:
     """Test GPT-OSS full fine-tuning task generation."""
 
-    def test_create_gpt_oss_full_20b(self):
+    def test_create_gpt_oss_full_20b(self) -> None:
         """Test GPT-OSS full task for 20B model."""
         task = create_gpt_oss_full_task(
             model_size="20b",
@@ -141,15 +150,15 @@ class TestGPTOSSFullTask:
         )
 
         assert isinstance(task, sky.Task)
-        assert "vibeml-gpt-oss-full-20b" in task.name
-        assert str(_resources(task).cloud) == "nebius"
+        assert task.name == "vibeml-gpt-oss-full-20b"
+        assert str(_resources(task).cloud) == "Nebius"
         assert _resources(task).accelerators == {"H100": 8}
         assert (
             _resources(task).use_spot is False
         )  # Full training needs stable instances
         assert task.num_nodes == 1
 
-    def test_create_gpt_oss_full_120b(self):
+    def test_create_gpt_oss_full_120b(self) -> None:
         """Test GPT-OSS full task for 120B model."""
         task = create_gpt_oss_full_task(
             model_size="120b",
@@ -164,29 +173,57 @@ class TestGPTOSSFullTask:
 class TestWorkflowRegistry:
     """Test workflow registry functions."""
 
-    def test_get_workflow_unsloth(self):
+    def test_get_workflow_unsloth(self) -> None:
         """Test getting Unsloth workflow."""
         workflow_func = get_workflow("unsloth")
         assert workflow_func == create_unsloth_task
 
-    def test_get_workflow_gpt_oss_lora(self):
+    def test_get_workflow_gpt_oss_lora(self) -> None:
         """Test getting GPT-OSS LoRA workflow."""
         workflow_func = get_workflow("gpt-oss-lora")
         assert workflow_func == create_gpt_oss_lora_task
 
-    def test_get_workflow_invalid(self):
+    def test_get_workflow_invalid(self) -> None:
         """Test getting invalid workflow."""
         with pytest.raises(ValueError) as exc_info:
             get_workflow("invalid-workflow")
         assert "Unknown workflow" in str(exc_info.value)
         assert "Available:" in str(exc_info.value)
 
-    def test_workflows_registry_contents(self):
+    def test_workflows_registry_contents(self) -> None:
         """Test that all expected workflows are in registry."""
         assert "unsloth" in WORKFLOWS
         assert "gpt-oss-lora" in WORKFLOWS
         assert "gpt-oss-full" in WORKFLOWS
         assert len(WORKFLOWS) == 3
+
+
+@pytest.mark.parametrize(
+    ("create", "kwargs"),
+    [
+        (create_unsloth_task, {"model": "org/model", "dataset": "d"}),
+        (create_gpt_oss_lora_task, {"model_size": "20b"}),
+        (create_gpt_oss_full_task, {"model_size": "20b"}),
+    ],
+)
+def test_every_workflow_mounts_the_bucket(
+    create: Callable[..., sky.Task], kwargs: dict[str, Any]
+) -> None:
+    """No workflow silently ignores cloud_bucket."""
+    task = create(cloud_bucket="ckpts", **kwargs)
+
+    assert task.storage_mounts["/outputs"].name == "ckpts"
+
+
+def test_tasks_run_on_nebius_eu_north1() -> None:
+    """Every workflow targets the same Nebius region."""
+    for task in (
+        create_unsloth_task(model="org/model", dataset="d"),
+        create_gpt_oss_lora_task(),
+        create_gpt_oss_full_task(),
+    ):
+        assert str(_resources(task).cloud) == "Nebius"
+        assert _resources(task).region == "eu-north1"
 
 
 class TestBuildTask:
@@ -212,8 +249,8 @@ class TestBuildTask:
         )
 
         assert _resources(task).accelerators == {"H100": 1}
-        assert "max_steps=100" in task.run
-        assert "learning_rate=0.0001" in task.run
+        assert "max_steps=100" in _run(task)
+        assert "learning_rate=0.0001" in _run(task)
 
     def test_gpt_oss_uses_model_as_size(self) -> None:
         """For GPT-OSS workflows the model argument is the size."""
