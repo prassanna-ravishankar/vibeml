@@ -80,7 +80,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.coverage.paths]
-source = ["src", "*/site-packages"]
+source = ["src", "*/src", "*/site-packages"]
 tests = ["tests", "*/tests"]
 
 [tool.coverage.run]
@@ -89,7 +89,8 @@ source = ["vibeml", "tests"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 93  # measured floor (Nov 2026); raise it as coverage improves
+# Measured floor (Nov 2026) over src and tests, lines and branches; raise it as coverage improves.
+fail_under = 93
 exclude_lines = [
   "pragma: no cover",
   "if TYPE_CHECKING:",
