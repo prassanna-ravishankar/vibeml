@@ -155,14 +155,20 @@ async def list_clusters(prefix: str) -> list[ClusterInfo]:
 
 @dataclass(frozen=True)
 class Launch:
-    """A submitted launch.
-
-    ``settled`` finishes when SkyPilot's launch request does. If the request
-    failed and the cluster was not kept, teardown has run by then.
-    """
+    """A submitted launch."""
 
     request_id: str
-    settled: "asyncio.Task[None]"
+    _owner: "asyncio.Task[None]"
+
+    @property
+    def settled(self) -> "asyncio.Future[None]":
+        """Finishes when SkyPilot's launch request does.
+
+        If the request failed and the cluster was not kept, teardown has run
+        by then. Cancelling this (for example with ``asyncio.wait_for``) only
+        stops waiting; the launch stays owned and watched.
+        """
+        return asyncio.shield(self._owner)
 
 
 async def launch(
@@ -232,17 +238,21 @@ async def launch(
     # Cancelling the caller must not cancel the owner: a submission already
     # in flight still needs watching and, on failure, cleanup.
     request_id = await asyncio.shield(submitted)
-    return Launch(request_id=request_id, settled=owner)
+    return Launch(request_id=request_id, _owner=owner)
 
 
 async def settle_all() -> None:
     """Wait until every launch owned by this process has settled.
 
     Failed launches are cleaned up only while this process runs; an embedding
-    application can await this before exiting.
+    application can await this before exiting. Cancelling the wait does not
+    cancel the launches.
     """
     while _owners:
-        await asyncio.gather(*_owners, return_exceptions=True)
+        # Shielded, so cancelling this waiter does not cancel the launches.
+        await asyncio.gather(
+            *(asyncio.shield(o) for o in _owners), return_exceptions=True
+        )
 
 
 async def _request_status(request_id: Any) -> str | None:

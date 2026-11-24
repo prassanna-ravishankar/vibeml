@@ -255,6 +255,66 @@ class TestLaunch:
 
         sdk.down.assert_not_called()
 
+    async def test_confirmed_success_after_get_error_returns(
+        self, sdk: MagicMock
+    ) -> None:
+        """If the status says the launch succeeded, nothing is torn down or retried."""
+        sdk.get.side_effect = ConnectionError("dropped")
+        sdk.api_status.return_value = [
+            MagicMock(request_id="req-launch", status="SUCCEEDED")
+        ]
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        await launch.settled
+
+        assert sdk.get.call_count == 1
+        sdk.down.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "records", [[], [MagicMock(request_id="req-other", status="FAILED")]]
+    )
+    async def test_missing_status_record_keeps_observing(
+        self, sdk: MagicMock, records: list[Any]
+    ) -> None:
+        """No matching status record is not evidence of failure."""
+        observations = iter([ConnectionError("dropped"), None])
+
+        def get(request_id: str) -> None:
+            outcome = next(observations)
+            if outcome is not None:
+                raise outcome
+
+        sdk.get.side_effect = get
+        sdk.api_status.return_value = records
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        await launch.settled
+
+        sdk.down.assert_not_called()
+
+    async def test_cancelling_a_waiter_does_not_cancel_the_launch(
+        self, sdk: MagicMock
+    ) -> None:
+        """Timing out on settled or settle_all leaves the launch owned and watched."""
+        release = threading.Event()
+
+        def get(request_id: str) -> None:
+            if request_id == "req-launch":
+                release.wait(timeout=5)
+                raise RuntimeError("provisioning failed")
+
+        sdk.get.side_effect = get
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(launch.settled, timeout=0.05)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(skypilot.settle_all(), timeout=0.05)
+        release.set()
+        await skypilot.settle_all()
+
+        sdk.down.assert_called_once_with("vibeml-a")
+
     async def test_cancelled_request_is_torn_down(self, sdk: MagicMock) -> None:
         """A cancelled launch request may leave partial resources, so it is cleaned up."""
         sdk.get.side_effect = RuntimeError("request cancelled")
