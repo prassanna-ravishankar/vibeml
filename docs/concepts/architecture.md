@@ -2,67 +2,60 @@
 
 ## Overview
 
-VibeML is a **thin MCP (Model Context Protocol) wrapper** around SkyPilot's Python API, providing natural language access to multi-cloud GPU training.
+VibeML is a **thin MCP (Model Context Protocol) server** over SkyPilot's client SDK. It gives AI assistants natural-language access to GPU training.
 
 VibeML **does not** maintain its own:
 
-- ❌ Job persistence layer (SkyPilot has `~/.sky/state.json`)
+- ❌ Job persistence layer (SkyPilot's API server owns cluster and job state)
 - ❌ Cluster state database (SkyPilot queries cloud providers directly)
-- ❌ Custom orchestration (SkyPilot handles provisioning/execution)
+- ❌ Custom orchestration (SkyPilot handles provisioning and execution)
 
 Instead, VibeML:
 
-- ✅ Wraps SkyPilot's Python API (`sky.launch()`, `sky.status()`, `sky.down()`)
-- ✅ Exposes these as MCP tools for AI assistants
-- ✅ Adds validation and cost guardrails
-- ✅ Provides workflow templates (Unsloth, GPT-OSS)
-- ✅ Translates natural language requests to SkyPilot Tasks
+- ✅ Exposes training operations as MCP tools for AI assistants
+- ✅ Provides workflow templates (Unsloth, GPT-OSS) that build SkyPilot tasks
+- ✅ Adds validation and cost estimation before launch
+- ✅ Translates SkyPilot's records into its own job model
 
 ## System Architecture
 
 ```mermaid
 graph LR
     A[User / AI Assistant] --> B[MCP Protocol]
-    B --> C[VibeML MCP Server]
-    C --> D[SkyPilot Python API]
-    D --> E[~/.sky/state.json]
+    B --> C[server.py<br/>MCP tools]
+    C --> T[tasks.py<br/>workflow templates]
+    C --> P[cloud.cost_estimator<br/>pricing]
+    C --> S[cloud.skypilot<br/>SDK adapter]
+    S --> D[SkyPilot API server]
     D --> F[Cloud Provider APIs]
-    F --> G[Nebius / AWS / GCP / Azure]
+    F --> G[Nebius]
 ```
+
+Each concern lives in one layer:
+
+| Layer | Owns | Does not |
+|-------|------|----------|
+| `server.py` | MCP tool signatures, input validation, response shape | Talk to SkyPilot, price GPUs, build tasks |
+| `tasks.py` | Turning workflow parameters into a `sky.Task` (`build_task`) | Launch anything |
+| `cloud/cost_estimator.py` | GPU pricing | Know about workflows |
+| `cloud/skypilot.py` | SkyPilot's request protocol, status mapping, SDK errors | Know about MCP |
 
 ## Component Responsibilities
 
-### 1. MCP Server Layer (`src/vibeml/server.py`)
+### 1. MCP Server (`src/vibeml/server.py`)
 
-**Purpose**: FastMCP server exposing training operations as tools
+**MCP tools**:
 
-**MCP Tools Provided**:
+- `launch_training()` - Submit a training job; returns immediately with the launch request ID
+- `get_training_status()` - Query a job's status
+- `stop_training()` - Download logs (optional) and tear the cluster down
+- `list_active_training_jobs()` - List pending and running vibeml clusters
+- `estimate_training_cost()` - Price the resources a workflow would request
+- `list_available_workflows()` - Describe workflow templates
 
-- `launch_training()` - Start a new training job
-- `get_training_status()` - Query job status
-- `stop_training()` - Terminate a running job
-- `list_active_training_jobs()` - List all active jobs
-- `estimate_training_cost()` - Calculate costs before launch
-- `list_available_workflows()` - Show workflow templates
-
-**Key Functions**:
-
-- Request validation (Pydantic models)
-- Natural language to SkyPilot Task translation
-- Cost estimation and budget enforcement
-- Status mapping (SkyPilot → VibeML JobStatus)
-
-**Does NOT**:
-
-- Store job records in a database
-- Maintain cluster state
-- Track training progress (delegates to SkyPilot)
+The server never writes to stdout: with the stdio transport, stdout carries the MCP protocol. Diagnostics go through `logging` (stderr).
 
 ### 2. Workflow Templates (`src/vibeml/tasks.py`)
-
-**Purpose**: Generate SkyPilot Task objects for common training patterns
-
-**Available Workflows**:
 
 ```python
 WORKFLOWS = {
@@ -72,137 +65,75 @@ WORKFLOWS = {
 }
 ```
 
-Each workflow function:
+Each workflow function takes model, dataset and hyperparameters and returns a configured `sky.Task` (setup script, run script, GPU resources). `build_task(workflow, model, dataset, gpu_type, **hyperparameters)` maps tool-level parameters onto a workflow's arguments. For GPT-OSS workflows the `model` argument is the size (`"20b"`, `"120b"`), and unknown sizes are rejected.
 
-- Takes model/dataset/hyperparameters as input
-- Returns a configured `sky.Task` object
-- Sets appropriate GPU resources
-- Configures training scripts
+Both `launch_training` and `estimate_training_cost` use `build_task`, so the cost estimate prices exactly the resources a launch would request (GPU type, GPUs per node, node count, spot or on demand).
 
-**Example** (Unsloth workflow):
+### 3. SkyPilot Adapter (`src/vibeml/cloud/skypilot.py`)
 
-```python
-def create_unsloth_task(
-    model: str,
-    dataset: str,
-    gpu_type: str = "L40S",
-    max_steps: int = 60,
-    ...
-) -> sky.Task:
-    return sky.Task(
-        name=f"vibeml-unsloth-{model}",
-        setup="pip install unsloth transformers",
-        run=training_script,
-        resources=sky.Resources(
-            cloud="nebius",
-            accelerators=f"{gpu_type}:1",
-            use_spot=True,
-        ),
-    )
-```
-
-### 3. State Management (SkyPilot-Native)
-
-**How SkyPilot Manages State**:
-
-SkyPilot maintains job state in `~/.sky/state.json`:
-
-```
-~/.sky/
-├── state.json           # Global state: all clusters
-├── catalogs/            # Cloud provider catalogs
-└── vibeml-unsloth-abc123/  # Per-cluster state
-    ├── jobs.yaml        # Job queue
-    └── metadata.json    # Cluster metadata
-```
-
-**VibeML queries this state** via SkyPilot's Python API:
+SkyPilot's client SDK is request-based: every call submits a request to the SkyPilot API server and returns a request ID, and `sky.get(request_id)` blocks until the result is ready. The adapter is the only module that deals with this:
 
 ```python
-# Get cluster status
-clusters = sky.status(cluster_names=["vibeml-unsloth-abc123"], refresh=True)
-
-# Returns list of ClusterRecord objects with:
-# - name, status, launched_at
-# - resources (GPU type, cloud, region)
-# - handle (cloud-specific metadata)
+async def get_cluster(name: str) -> ClusterInfo | None
+async def list_clusters(prefix: str) -> list[ClusterInfo]
+async def launch(task: sky.Task, cluster_name: str) -> str   # request ID
+async def down(name: str) -> None
+async def download_logs(name: str) -> dict[str, str]        # job ID -> local dir
 ```
 
-**State reconciliation**: SkyPilot queries cloud provider APIs during `refresh=True` to sync local state with actual cluster status.
+- Blocking SDK calls run in a worker thread (`asyncio.to_thread`), so the MCP event loop stays responsive.
+- `launch` returns the request ID without waiting. Provisioning takes minutes, which is too long for a tool call; follow it with `sky api logs <request_id>`.
+- SDK failures are raised as `SkyPilotError`, never reported as "not found".
+- SkyPilot's `StatusResponse` records become vibeml's `ClusterInfo`.
 
-## Request Flow Example
-
-### Lifecycle
-
-```
-User Request
-    ↓
-    → launch_training()
-    ↓
-    → Validate TrainingRequest (Pydantic)
-    ↓
-    → Get workflow function (e.g., create_unsloth_task)
-    ↓
-    → Generate SkyPilot Task object
-    ↓
-    → sky.launch(task, cluster_name="vibeml-unsloth-abc123")
-    ↓
-SkyPilot provisions cluster, stores state
-    ↓
-    → Return cluster_id to user
-    ↓
-User monitors via get_training_status()
-    ↓
-    → _get_cluster_from_skypilot(cluster_id)
-    ↓
-    → sky.status(cluster_names=[cluster_id])
-    ↓
-    → Map SkyPilot status to JobStatus
-    ↓
-    → Return status to user
-```
-
-### Tool Interactions
+## Job Status
 
 ```python
-# User: "Train Llama-3.2-1B on Alpaca with L40S GPU"
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TERMINATED = "terminated"
+```
 
-# 1. MCP Tool Call
-launch_training(
-    model="meta-llama/Llama-3.2-1B",
-    dataset="tatsu-lab/alpaca",
-    workflow="unsloth",
-    gpu_type="L40S",
-)
+SkyPilot cluster statuses map as follows. Every `sky.ClusterStatus` member must be mapped, so a new SkyPilot status fails loudly instead of being mislabelled.
 
-# 2. VibeML Validates & Translates
-task = create_unsloth_task(
-    model="meta-llama/Llama-3.2-1B",
-    dataset="tatsu-lab/alpaca",
-    gpu_type="L40S",
-)
+| `sky.ClusterStatus` | `JobStatus` |
+|---------------------|-------------|
+| `INIT`, `PENDING` | `pending` |
+| `UP`, `AUTOSTOPPING` | `running` |
+| `STOPPED` | `terminated` |
 
-# 3. SkyPilot Launches
-cluster_handle = sky.launch(
-    task,
-    cluster_name="vibeml-unsloth-abc123",
-    detach_run=True
-)
+Torn-down clusters disappear from SkyPilot's status, so `get_training_status` reports them as not found.
 
-# 4. User Monitors
-status_data = await _get_cluster_from_skypilot("vibeml-unsloth-abc123")
-# Returns: {"status": "UP", "launched_at": "2025-10-26T...", ...}
+## Request Flow
+
+```
+launch_training()
+    → TrainingRequest validation (Pydantic)
+    → build_task() → sky.Task
+    → skypilot.launch() → sky.launch() → request ID
+    ← {"status": "submitted", "cluster_id", "launch_request_id", "logs_command"}
+
+get_training_status(cluster_id)
+    → skypilot.get_cluster() → sky.get(sky.status([cluster_id]))
+    ← {"status": "running", "sky_status": "UP", "launched_at": ...}
+
+stop_training(cluster_id)
+    → skypilot.download_logs() → sky.download_logs()
+    → skypilot.down() → sky.get(sky.down(cluster_id))
+    ← {"status": "stopped", "log_paths": {...}}
 ```
 
 ## Data Models
 
 ### TrainingRequest
 
-**Purpose**: Validate user input before processing
+Validates user input before a task is built:
 
 ```python
-@dataclass
-class TrainingRequest:
+class TrainingRequest(BaseModel):
     model: str              # "meta-llama/Llama-3.2-1B"
     dataset: str            # "tatsu-lab/alpaca"
     workflow: str           # "unsloth" | "gpt-oss-lora" | "gpt-oss-full"
@@ -211,119 +142,39 @@ class TrainingRequest:
     hyperparameters: dict   # learning_rate, lora_r, max_seq_length, etc.
 ```
 
-### JobStatus Enum
-
-**Purpose**: User-friendly status abstraction
-
-```python
-class JobStatus(str, Enum):
-    PENDING = "pending"      # SkyPilot: INIT
-    RUNNING = "running"      # SkyPilot: UP
-    COMPLETED = "completed"  # (Inferred from logs/exit code)
-    FAILED = "failed"        # (Error states or unknown)
-    TERMINATED = "terminated" # SkyPilot: STOPPED, TERMINATED
-```
-
-**Mapping function**:
-
-```python
-def _map_sky_status_to_job_status(sky_status: str) -> JobStatus:
-    """Map SkyPilot cluster status to VibeML JobStatus."""
-    status_map = {
-        "INIT": JobStatus.PENDING,
-        "UP": JobStatus.RUNNING,
-        "STOPPED": JobStatus.TERMINATED,
-        "TERMINATED": JobStatus.TERMINATED,
-    }
-    return status_map.get(sky_status, JobStatus.FAILED)
-```
-
 ## Why This Architecture?
 
 **Benefits**:
 
-- **Simpler**: ~600 lines of SQLite code removed
-- **More Reliable**: No state drift between VibeML and SkyPilot
-- **Survives Restarts**: Job state persists even if VibeML server crashes
-- **Zero Reconciliation**: SkyPilot handles cloud provider sync
-- **Direct Access**: Users can use `sky` CLI commands alongside VibeML
+- **No state drift**: SkyPilot is the only source of truth for clusters
+- **Survives restarts**: job state persists if the VibeML server stops
+- **Direct access**: users can use `sky` CLI commands alongside VibeML
+- **Replaceable edges**: the MCP layer and the SkyPilot adapter can change independently
 
 **Trade-offs**:
 
-- Cannot customize job metadata beyond what SkyPilot tracks
-- Tied to SkyPilot's state schema (currently not an issue)
-- No historical data after cluster deletion (acceptable for MVP)
+- Cannot store job metadata beyond what SkyPilot tracks
+- No history after a cluster is torn down
 
 ## Testing Strategy
 
-### Unit Tests (`tests/test_server_skypilot.py`)
+- `tests/test_skypilot.py` tests the adapter against mocked SDK responses built from SkyPilot's real `StatusResponse` and `ClusterStatus` types, so a change in SkyPilot's response shape breaks the tests.
+- `tests/test_server.py` calls the tools through FastMCP's in-memory `Client`, the same path a real MCP client uses, with the adapter mocked.
+- `tests/test_tasks.py` covers the workflow templates and `build_task`.
 
-Test helper functions that interact with SkyPilot:
-
-```python
-class TestStatusMapping:
-    """Test SkyPilot status to JobStatus mapping."""
-
-    def test_map_init_to_pending(self):
-        assert _map_sky_status_to_job_status("INIT") == JobStatus.PENDING
-
-    def test_map_up_to_running(self):
-        assert _map_sky_status_to_job_status("UP") == JobStatus.RUNNING
-
-class TestGetClusterFromSkyPilot:
-    """Test _get_cluster_from_skypilot helper."""
-
-    @pytest.mark.asyncio
-    async def test_get_existing_cluster(self):
-        # Mock sky.status() to return cluster info
-        result = await _get_cluster_from_skypilot("test-cluster")
-        assert result["cluster_name"] == "test-cluster"
-```
-
-### Integration Tests
-
-Would test end-to-end MCP tool calls:
-
-- Launch → Status → Stop workflow
-- Cost estimation accuracy
-- Error handling (no GPU availability, quota limits)
+No test launches real cloud resources.
 
 ## Error Handling
 
-### SkyPilot Errors
-
-VibeML lets most SkyPilot exceptions bubble up with context:
+Every tool returns errors as data instead of raising:
 
 ```python
-try:
-    cluster_handle = await loop.run_in_executor(
-        None,
-        lambda: sky.launch(task, cluster_name=cluster_id)
-    )
-except Exception as e:
-    raise SkyPilotError(f"Failed to launch training: {str(e)}")
+{"status": "error", "error": "validation_error", "message": "..."}
+{"status": "error", "error": "skypilot_error", "message": "..."}
+{"status": "error", "error": "not_found", "message": "..."}
 ```
 
-### Validation Errors
-
-Pydantic validation catches bad inputs early:
-
-```python
-try:
-    request = TrainingRequest(
-        model=model,
-        dataset=dataset,
-        workflow=workflow,
-        ...
-    )
-except PydanticValidationError as e:
-    return {
-        "status": "error",
-        "error": "validation_error",
-        "message": str(e),
-        "details": e.errors(),
-    }
-```
+Validation errors are caught before anything reaches SkyPilot.
 
 ## References
 

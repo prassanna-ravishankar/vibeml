@@ -34,7 +34,7 @@ VibeML democratizes AI model training by providing natural language access to mu
 - **Cost Optimization**: Automatic GPU selection, spot instance management, and budget tracking
 - **Pre-configured Workflows**: Unsloth, LoRA, and full fine-tuning templates ready to use
 - **MCP Integration**: First-class support for Model Context Protocol
-- **Zero State Management**: Job state managed by SkyPilot (`~/.sky/state.json`) - survives restarts
+- **Zero State Management**: Job state is owned by SkyPilot and survives restarts
 
 ## 🚀 Quick Start
 

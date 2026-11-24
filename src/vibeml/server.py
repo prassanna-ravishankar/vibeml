@@ -179,7 +179,7 @@ async def list_available_workflows() -> dict[str, Any]:
     workflows_info = {
         "unsloth": {
             "description": (
-                "Efficient fine-tuning for 7B-13B models using 4-bit quantization + LoRA"
+                "Efficient fine-tuning for 7B-13B models with 4-bit quantization + LoRA"
             ),
             "gpu_types": ["L40S", "RTX4090", "H100", "A100"],
             "best_for": "Quick experiments, cost-effective training",
