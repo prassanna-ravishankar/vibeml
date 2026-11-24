@@ -161,4 +161,4 @@ This project was generated from [@cjolowicz]'s [uv hypermodern python cookiecutt
 
 [license]: https://github.com/prassanna-ravishankar/vibeml/blob/main/LICENSE
 [contributor guide]: https://github.com/prassanna-ravishankar/vibeml/blob/main/CONTRIBUTING.md
-[command-line reference]: https://prassanna.io/vibeml/usage.html
+[command-line reference]: https://prassanna.io/vibeml/reference/cli/
