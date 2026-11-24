@@ -122,8 +122,9 @@ User-supplied values (`model`, `dataset`, `output_dir`) reach the training scrip
 
 What the cap covers, and what it does not:
 
-- SkyPilot arms autostop after provisioning, file and storage sync, and setup. vibeml keeps setup to directory preparation and installs dependencies at the start of the run, so slow or hanging installs and training are covered.
-- **Not covered**: provisioning time, and failures during provisioning or storage mounting. SkyPilot keeps a cluster that fails before the job starts (for debugging), and no timer is armed yet. Check `sky status` after a failed launch.
+- SkyPilot arms autostop after provisioning, file and storage sync, and setup. vibeml keeps setup to output-directory preparation and installs dependencies at the start of the run, so slow or hanging installs and training are covered.
+- **Failed launches are cleaned up by the launcher.** `launch_training` returns immediately, but the MCP server keeps watching the launch request. If it fails before the job starts (provisioning, storage mount, directory setup), the server tears the cluster down. Pass `keep_on_failure=True` to keep it for debugging.
+- **Not covered**: provisioning and setup time is billed but not counted against the cap. If the vibeml server process itself stops before a failed launch settles, nothing tears the cluster down; check `sky status`.
 - The timer is polled about once a minute, and cloud teardown takes time, so the cap is approximate. Prices are vibeml's Nebius estimates, including the spot discount.
 
 ## Request Flow

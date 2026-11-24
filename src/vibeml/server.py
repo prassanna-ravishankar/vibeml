@@ -62,6 +62,7 @@ async def launch_training(
     output_dir: str | None = None,
     cloud_bucket: str | None = None,
     estimated_hours: Hours = 4.0,
+    keep_on_failure: bool = False,
 ) -> dict[str, Any]:
     """Launch a model training job on Nebius Cloud.
 
@@ -69,9 +70,15 @@ async def launch_training(
     takes several minutes. Follow it with ``get_training_status``.
 
     With ``max_cost``, the launch is refused if the cost estimate for
-    ``estimated_hours`` exceeds it. Otherwise the cluster is torn down once
-    the budget's worth of runtime has elapsed, even if training is still
-    running.
+    ``estimated_hours`` exceeds it. Otherwise the cluster is torn down about
+    once the budget's worth of runtime has elapsed, even if training is still
+    running. The cap is approximate: it counts from job start (provisioning
+    and output-directory setup are billed but not counted), is checked about
+    once a minute, and uses estimated prices.
+
+    If the launch fails (provisioning, storage mount, setup), this server
+    tears the cluster down unless ``keep_on_failure`` is set. That needs the
+    server to keep running until the launch settles.
 
     Args:
         workflow: Training workflow type (unsloth, gpt-oss-lora, gpt-oss-full)
@@ -86,6 +93,7 @@ async def launch_training(
         output_dir: Absolute output directory (default /outputs)
         cloud_bucket: Bucket to mount at the output directory, so checkpoints persist
         estimated_hours: Expected training time, used to check max_cost
+        keep_on_failure: Leave a cluster whose launch failed up for debugging
 
     Returns:
         Dict with cluster_id, the launch request ID, how to follow it, and
@@ -143,11 +151,15 @@ async def launch_training(
 
     cluster_id = f"{CLUSTER_PREFIX}{workflow}-{uuid.uuid4().hex[:8]}"
     try:
-        request_id = await skypilot.launch(
-            task, cluster_name=cluster_id, max_minutes=max_minutes
+        launch = await skypilot.launch(
+            task,
+            cluster_name=cluster_id,
+            max_minutes=max_minutes,
+            keep_on_failure=keep_on_failure,
         )
     except SkyPilotError as e:
         return _error("skypilot_error", str(e))
+    request_id = launch.request_id
 
     logger.info(
         "Submitted %s launch for %s (request %s)", workflow, cluster_id, request_id

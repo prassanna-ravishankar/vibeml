@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import sky
 from sky.schemas.api.responses import StatusResponse
+from sky.server import common as server_common
 from sky.skylet.autostop_lib import AutostopWaitFor
 
 from vibeml.cloud import skypilot
@@ -43,7 +44,13 @@ def sdk() -> Any:
 
     Every SDK call returns a request ID; ``sky.get`` resolves it.
     """
-    with patch.object(skypilot, "sky", autospec=True) as mock_sky:
+    with (
+        patch.object(skypilot, "sky", autospec=True) as mock_sky,
+        patch.object(
+            server_common, "check_server_healthy_or_start_fn", autospec=True
+        ) as start_server,
+    ):
+        mock_sky.start_server = start_server
         mock_sky.ClusterStatus = sky.ClusterStatus
         mock_sky.StatusRefreshMode = sky.StatusRefreshMode
         mock_sky.status.return_value = "req-status"
@@ -169,15 +176,56 @@ class TestListClusters:
 class TestLaunch:
     """launch submits the task and returns without waiting for provisioning."""
 
-    async def test_returns_request_id_without_blocking(self, sdk: MagicMock) -> None:
-        """Provisioning takes minutes, so the request ID is returned immediately."""
+    async def test_returns_before_provisioning_finishes(self, sdk: MagicMock) -> None:
+        """Provisioning takes minutes, so launch returns while it is in flight."""
+        provisioned = threading.Event()
+        sdk.get.side_effect = lambda request_id: provisioned.wait(timeout=5)
         task = sky.Task(run="echo hi")
 
-        request_id = await skypilot.launch(task, cluster_name="vibeml-a")
+        launch = await skypilot.launch(task, cluster_name="vibeml-a")
 
         sdk.launch.assert_called_once_with(task, cluster_name="vibeml-a")
-        sdk.get.assert_not_called()
-        assert request_id == "req-launch"
+        assert launch.request_id == "req-launch"
+        assert not launch.settled.done()
+        provisioned.set()
+        await launch.settled
+        sdk.down.assert_not_called()
+
+    async def test_failed_launch_is_torn_down(self, sdk: MagicMock) -> None:
+        """A launch that fails during provisioning is cleaned up by the launcher."""
+
+        def get(request_id: str) -> None:
+            if request_id == "req-launch":
+                raise RuntimeError("storage mount failed")
+
+        sdk.get.side_effect = get
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        await launch.settled
+
+        sdk.down.assert_called_once_with("vibeml-a")
+        sdk.get.assert_any_call("req-down")
+
+    async def test_failed_launch_kept_on_request(self, sdk: MagicMock) -> None:
+        """keep_on_failure leaves a failed cluster up for debugging."""
+        sdk.get.side_effect = RuntimeError("provisioning failed")
+
+        launch = await skypilot.launch(
+            sky.Task(run="echo hi"), cluster_name="vibeml-a", keep_on_failure=True
+        )
+        await launch.settled
+
+        sdk.down.assert_not_called()
+
+    async def test_failed_cleanup_does_not_raise(self, sdk: MagicMock) -> None:
+        """If teardown fails too, the watcher logs it instead of crashing."""
+        sdk.get.side_effect = RuntimeError("provisioning failed")
+        sdk.down.side_effect = RuntimeError("cloud API down")
+
+        launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
+        await launch.settled  # does not raise
+
+        sdk.down.assert_called_once_with("vibeml-a")
 
     async def test_runtime_cap_becomes_unconditional_autostop(
         self, sdk: MagicMock
@@ -185,7 +233,8 @@ class TestLaunch:
         """A runtime cap tears the cluster down after that many minutes, jobs or not."""
         task = sky.Task(run="echo hi")
 
-        await skypilot.launch(task, cluster_name="vibeml-a", max_minutes=120)
+        launch = await skypilot.launch(task, cluster_name="vibeml-a", max_minutes=120)
+        await launch.settled
 
         sdk.launch.assert_called_once_with(
             task,
@@ -194,6 +243,28 @@ class TestLaunch:
             down=True,
             wait_for=AutostopWaitFor.NONE,
         )
+
+    async def test_runtime_cap_starts_api_server_before_checking_version(
+        self, sdk: MagicMock
+    ) -> None:
+        """On a cold machine the local API server must be up before api_info."""
+        order = MagicMock()
+        order.attach_mock(sdk.start_server, "start")
+        order.attach_mock(sdk.api_info, "api_info")
+        order.attach_mock(sdk.launch, "launch")
+
+        launch = await skypilot.launch(
+            sky.Task(run="echo hi"), cluster_name="vibeml-a", max_minutes=60
+        )
+        await launch.settled
+
+        assert [
+            c[0] for c in order.mock_calls if c[0] in {"start", "api_info", "launch"}
+        ] == [
+            "start",
+            "api_info",
+            "launch",
+        ]
 
     async def test_runtime_cap_fails_closed_on_old_api_server(
         self, sdk: MagicMock

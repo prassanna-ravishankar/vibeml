@@ -8,18 +8,26 @@ handle request IDs, blocking calls, or SkyPilot enums directly.
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 import sky
+from sky.server import common as server_common
 from sky.skylet.autostop_lib import AutostopWaitFor
 
 from ..exceptions import SkyPilotError
 from ..models import JobStatus
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
+
+# Launch watchers run in the background; keep strong references until they
+# finish so they are not garbage-collected mid-flight.
+_watchers: set["asyncio.Task[None]"] = set()
 
 # First SkyPilot API version that honours autostop ``wait_for``; older servers
 # silently drop it, which would turn the runtime cap into an idle-only cap.
@@ -137,24 +145,43 @@ async def list_clusters(prefix: str) -> list[ClusterInfo]:
     )
 
 
+@dataclass(frozen=True)
+class Launch:
+    """A submitted launch.
+
+    ``settled`` finishes when SkyPilot's launch request does. If the request
+    failed and the cluster was not kept, teardown has run by then.
+    """
+
+    request_id: str
+    settled: "asyncio.Task[None]"
+
+
 async def launch(
-    task: sky.Task, cluster_name: str, max_minutes: int | None = None
-) -> str:
+    task: sky.Task,
+    cluster_name: str,
+    max_minutes: int | None = None,
+    keep_on_failure: bool = False,
+) -> Launch:
     """Submit a launch request without waiting for it to finish.
 
-    Provisioning and setup take minutes; the returned request ID can be
-    followed with ``sky api logs <request_id>``.
+    Provisioning and setup take minutes; the request ID can be followed with
+    ``sky api logs <request_id>``. In the background, the launcher waits for
+    the request, and if it fails (during provisioning, file or storage sync,
+    or setup) tears the cluster down, so a failed launch is not left running.
+    That needs this process to stay alive until the request settles.
 
     Args:
         task: Task to run.
         cluster_name: Name for the new cluster.
-        max_minutes: Hard runtime cap. The cluster is torn down this many
+        max_minutes: Runtime cap. The cluster is torn down about this many
             minutes after the job starts, whether or not it is still running
-            (SkyPilot autostop with ``wait_for=NONE`` and ``down``; the
-            autostop timer resets when a job starts).
+            (SkyPilot autostop with ``wait_for=NONE`` and ``down``). The timer
+            is polled about once a minute, so the cap is approximate.
+        keep_on_failure: Leave a cluster whose launch failed up for debugging.
 
     Returns:
-        The launch request ID.
+        The submitted launch.
     """
     cap: dict[str, Any] = {}
     if max_minutes is not None:
@@ -166,6 +193,9 @@ async def launch(
 
     def submit() -> Any:
         if cap:
+            # api_info does not start the local API server the way launch
+            # does, so bring it up through the same lifecycle first.
+            server_common.check_server_healthy_or_start_fn()
             api_version = int(sky.api_info().api_version)
             if api_version < _MIN_API_VERSION_FOR_WAIT_FOR:
                 raise SkyPilotError(
@@ -175,7 +205,37 @@ async def launch(
         return sky.launch(task, cluster_name=cluster_name, **cap)
 
     request_id = await _call(submit)
-    return str(request_id)
+    settled = asyncio.create_task(_settle(request_id, cluster_name, keep_on_failure))
+    _watchers.add(settled)
+    settled.add_done_callback(_watchers.discard)
+    return Launch(request_id=str(request_id), settled=settled)
+
+
+async def _settle(request_id: Any, cluster_name: str, keep_on_failure: bool) -> None:
+    """Wait for a launch request; tear the cluster down if it failed.
+
+    Args:
+        request_id: The launch request.
+        cluster_name: Cluster the request launches.
+        keep_on_failure: Leave a failed cluster up for debugging.
+    """
+    try:
+        await asyncio.to_thread(sky.get, request_id)
+    except Exception as e:
+        if keep_on_failure:
+            logger.warning(
+                "Launch of %s failed, kept for debugging: %s", cluster_name, e
+            )
+            return
+        logger.warning("Launch of %s failed, tearing it down: %s", cluster_name, e)
+        try:
+            await asyncio.to_thread(lambda: sky.get(sky.down(cluster_name)))
+        except Exception as down_error:
+            logger.error(
+                "Teardown of failed launch %s also failed; check `sky status`: %s",
+                cluster_name,
+                down_error,
+            )
 
 
 async def down(name: str) -> None:

@@ -2,11 +2,12 @@
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
+from pydantic import ValidationError as PydanticValidationError
 
 from vibeml import server
 from vibeml.cloud.skypilot import ClusterInfo
@@ -60,7 +61,7 @@ class TestLaunchTraining:
 
     async def test_submits_task_and_returns_request_id(self, adapter: Any) -> None:
         """The response carries the cluster name and the launch request ID."""
-        adapter.launch.return_value = "req-123"
+        adapter.launch.return_value = MagicMock(request_id="req-123")
 
         result = await call("launch_training", workflow="unsloth", gpu_type="H100")
 
@@ -115,6 +116,85 @@ class TestLaunchTraining:
             "error": "skypilot_error",
             "message": "no credentials",
         }
+
+
+class TestCostGuard:
+    """max_cost is enforced by the launcher, before and during the run."""
+
+    async def test_over_budget_is_refused_before_launch(self, adapter: Any) -> None:
+        """An estimate above max_cost never reaches SkyPilot."""
+        result = await call("launch_training", max_cost=1.0, estimated_hours=10)
+
+        adapter.launch.assert_not_called()
+        assert result["status"] == "error"
+        assert result["error"] == "over_budget"
+        assert result["estimated_cost"] == pytest.approx(1.2 * 0.7 * 10)
+
+    async def test_within_budget_launches_with_a_runtime_cap(
+        self, adapter: Any
+    ) -> None:
+        """The cap becomes a teardown after the minutes the budget buys."""
+        adapter.launch.return_value = MagicMock(request_id="req-1")
+
+        result = await call("launch_training", max_cost=4.2, estimated_hours=1)
+
+        assert adapter.launch.call_args.kwargs["max_minutes"] == 300
+        assert result["cost_guard"] == {"max_cost": 4.2, "teardown_after_minutes": 300}
+
+    async def test_sub_minute_budget_is_refused(self, adapter: Any) -> None:
+        """A budget that buys less than a minute cannot be enforced, so it is refused."""
+        result = await call("launch_training", max_cost=0.001, estimated_hours=0.001)
+
+        adapter.launch.assert_not_called()
+        assert result["error"] == "over_budget"
+
+    async def test_infinite_budget_is_rejected(self, adapter: Any) -> None:
+        """max_cost must be finite.
+
+        JSON clients can send it (Python parses 1e999 as inf); the MCP client
+        itself serializes inf to null, so validate through the tool directly.
+        """
+        tool = await server.mcp.get_tool("launch_training")
+        assert tool is not None
+
+        with pytest.raises(PydanticValidationError, match="finite"):
+            await tool.run({"max_cost": float("inf")})
+
+        adapter.launch.assert_not_called()
+
+    async def test_without_max_cost_there_is_no_cap(self, adapter: Any) -> None:
+        """No budget, no runtime cap."""
+        adapter.launch.return_value = MagicMock(request_id="req-1")
+
+        result = await call("launch_training")
+
+        assert adapter.launch.call_args.kwargs["max_minutes"] is None
+        assert "cost_guard" not in result
+
+
+class TestLaunchOptions:
+    """Bucket and failure-cleanup options reach the launch."""
+
+    async def test_cloud_bucket_reaches_the_task(self, adapter: Any) -> None:
+        """The bucket is mounted where checkpoints are written."""
+        adapter.launch.return_value = MagicMock(request_id="req-1")
+
+        await call("launch_training", cloud_bucket="ckpts")
+
+        (task,), _ = adapter.launch.call_args
+        assert task.storage_mounts["/outputs"].name == "ckpts"
+
+    async def test_failed_launches_are_cleaned_up_by_default(
+        self, adapter: Any
+    ) -> None:
+        """The launcher tears down failed launches unless asked to keep them."""
+        adapter.launch.return_value = MagicMock(request_id="req-1")
+
+        await call("launch_training")
+        assert adapter.launch.call_args.kwargs["keep_on_failure"] is False
+
+        await call("launch_training", keep_on_failure=True)
+        assert adapter.launch.call_args.kwargs["keep_on_failure"] is True
 
 
 class TestGetTrainingStatus:
