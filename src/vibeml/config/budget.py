@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -128,7 +129,7 @@ class BudgetManager:
         Returns:
             Dictionary mapping workflow to total spending
         """
-        spending = {}
+        spending: dict[str, float] = {}
         for record in self._spending_records:
             workflow = record.workflow
             spending[workflow] = spending.get(workflow, 0.0) + record.amount
@@ -140,7 +141,7 @@ class BudgetManager:
         Returns:
             Dictionary mapping GPU type to total spending
         """
-        spending = {}
+        spending: dict[str, float] = {}
         for record in self._spending_records:
             gpu = record.gpu_type
             spending[gpu] = spending.get(gpu, 0.0) + record.amount
@@ -212,7 +213,7 @@ class BudgetManager:
     def get_spending_summary(
         self,
         since: datetime | None = None,
-    ) -> dict[str, any]:
+    ) -> dict[str, Any]:
         """Get spending summary with breakdown.
 
         Args:

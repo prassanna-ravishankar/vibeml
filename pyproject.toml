@@ -105,6 +105,12 @@ pretty = true
 show_column_numbers = true
 show_error_context = true
 
+# huggingface_hub re-exports its errors from huggingface_hub.utils, which works
+# across the supported versions; huggingface_hub.errors only has them in newer ones.
+[[tool.mypy.overrides]]
+module = "huggingface_hub.*"
+implicit_reexport = true
+
 [tool.ruff]
 src = ["src", "tests"]
 

@@ -92,8 +92,8 @@ class TestBudgetExceededError:
     def test_budget_exceeded_basic(self) -> None:
         """Test basic budget exceeded error."""
         error = BudgetExceededError("Cost limit exceeded")
-        assert "Cost limit exceeded" in error.message
-        assert "max_cost" in error.recovery_suggestion
+        assert "Cost limit exceeded" in str(error.message)
+        assert "max_cost" in str(error.recovery_suggestion)
 
     def test_budget_exceeded_with_costs(self) -> None:
         """Test budget error with cost information."""
@@ -108,7 +108,7 @@ class TestBudgetExceededError:
     def test_budget_exceeded_default_suggestion(self) -> None:
         """Test default recovery suggestion."""
         error = BudgetExceededError("Budget exceeded")
-        assert "spot instances" in error.recovery_suggestion
+        assert "spot instances" in str(error.recovery_suggestion)
 
 
 class TestCloudProviderError:
@@ -136,8 +136,8 @@ class TestModelNotFoundError:
     def test_model_not_found_basic(self) -> None:
         """Test basic model not found error."""
         error = ModelNotFoundError("Model not found")
-        assert "Model not found" in error.message
-        assert "HuggingFace" in error.recovery_suggestion
+        assert "Model not found" in str(error.message)
+        assert "HuggingFace" in str(error.recovery_suggestion)
 
     def test_model_not_found_with_id(self) -> None:
         """Test model error with model ID."""
@@ -154,8 +154,8 @@ class TestDatasetError:
     def test_dataset_error_basic(self) -> None:
         """Test basic dataset error."""
         error = DatasetError("Dataset access failed")
-        assert "Dataset access failed" in error.message
-        assert "HuggingFace" in error.recovery_suggestion
+        assert "Dataset access failed" in str(error.message)
+        assert "HuggingFace" in str(error.recovery_suggestion)
 
     def test_dataset_error_with_id(self) -> None:
         """Test dataset error with dataset ID."""
@@ -208,8 +208,8 @@ class TestRetryWithBackoff:
             always_fails()
 
         error = exc_info.value
-        assert "failed after 2 retries" in error.message
-        assert "Permanent error" in error.technical_details
+        assert "failed after 2 retries" in str(error.message)
+        assert "Permanent error" in str(error.technical_details)
 
     def test_exponential_backoff_timing(self) -> None:
         """Test that backoff delays increase exponentially."""
@@ -238,8 +238,8 @@ class TestErrorTranslator:
         error = Exception("No resource available in region")
         translated = ErrorTranslator.translate(error)
 
-        assert "GPU resources currently available" in translated.message
-        assert "different GPU type" in translated.recovery_suggestion
+        assert "GPU resources currently available" in str(translated.message)
+        assert "different GPU type" in str(translated.recovery_suggestion)
         assert translated.technical_details == "No resource available in region"
 
     def test_translate_quota_exceeded(self) -> None:
@@ -248,7 +248,7 @@ class TestErrorTranslator:
         translated = ErrorTranslator.translate(error)
 
         assert "quota limit reached" in translated.message.lower()
-        assert "increase quota" in translated.recovery_suggestion
+        assert "increase quota" in str(translated.recovery_suggestion)
 
     def test_translate_permission_denied(self) -> None:
         """Test translating permission error."""
@@ -256,7 +256,7 @@ class TestErrorTranslator:
         translated = ErrorTranslator.translate(error)
 
         assert "permissions" in translated.message.lower()
-        assert "credentials" in translated.recovery_suggestion
+        assert "credentials" in str(translated.recovery_suggestion)
 
     def test_translate_unknown_error(self) -> None:
         """Test translating unknown error."""
@@ -274,7 +274,7 @@ class TestErrorTranslator:
 
         assert isinstance(translated, SkyPilotError)
         assert "cluster not found" in translated.message.lower()
-        assert "terminated" in translated.recovery_suggestion
+        assert "terminated" in str(translated.recovery_suggestion)
 
     def test_translate_skypilot_launch_failed(self) -> None:
         """Test translating SkyPilot launch failed error."""
@@ -283,7 +283,7 @@ class TestErrorTranslator:
 
         assert isinstance(translated, SkyPilotError)
         assert "launch" in translated.message.lower()
-        assert "cloud provider" in translated.recovery_suggestion
+        assert "cloud provider" in str(translated.recovery_suggestion)
 
     def test_context_preservation(self) -> None:
         """Test that error context is preserved."""
