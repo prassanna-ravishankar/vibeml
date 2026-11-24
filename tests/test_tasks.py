@@ -240,12 +240,12 @@ class TestOutputs:
     def test_checkpoints_land_in_the_mounted_bucket(
         self, create: Callable[..., sky.Task], kwargs: dict[str, Any]
     ) -> None:
-        """The run script saves the final model under the mount point."""
+        """The mount point and the save path are the same variable."""
         task = create(cloud_bucket="ckpts", **kwargs)
 
         (mount,) = task.storage_mounts
-        assert mount == OUTPUTS_DIR
-        assert f"'{mount}/final_model'" in _run(task)
+        assert mount == OUTPUTS_DIR == task.envs["VIBEML_OUTPUT_DIR"]
+        assert "os.environ['VIBEML_OUTPUT_DIR']" in _run(task)
 
     @pytest.mark.parametrize(("create", "kwargs"), CHECKPOINT_WRITERS)
     def test_custom_output_dir_moves_the_mount(
@@ -255,7 +255,7 @@ class TestOutputs:
         task = create(cloud_bucket="ckpts", output_dir="/ckpt", **kwargs)
 
         assert set(task.storage_mounts) == {"/ckpt"}
-        assert "'/ckpt/final_model'" in _run(task)
+        assert task.envs["VIBEML_OUTPUT_DIR"] == "/ckpt"
 
     @pytest.mark.parametrize(
         ("create", "kwargs"),
@@ -268,12 +268,14 @@ class TestOutputs:
         with pytest.raises(ValidationError, match="absolute"):
             create(output_dir="./outputs", **kwargs)
 
-    def test_without_bucket_setup_creates_output_dir(self) -> None:
-        """Without a mount, setup creates the output directory for the job."""
+    def test_without_bucket_setup_only_creates_a_missing_dir(self) -> None:
+        """Setup creates the output directory, never re-owning an existing one."""
         task = create_unsloth_task(model="org/model", dataset="d")
 
         assert not task.storage_mounts
-        assert f"mkdir -p {OUTPUTS_DIR}" in str(task.setup)
+        setup = str(task.setup)
+        assert 'if [ ! -e "$VIBEML_OUTPUT_DIR" ]' in setup
+        assert 'mkdir -p -- "$VIBEML_OUTPUT_DIR"' in setup
 
     def test_build_task_forwards_bucket_for_gpt_oss(self) -> None:
         """build_task passes cloud_bucket to every workflow."""
@@ -282,6 +284,49 @@ class TestOutputs:
         )
 
         assert task.storage_mounts[OUTPUTS_DIR].name == "ckpts"
+
+
+HOSTILE = [
+    "/data/my outputs",
+    "/data/o'quote",
+    '/data/o"dq',
+    "/data/outputs; touch /data/injected #",
+    "/data/$(id)`id`",
+]
+
+
+class TestUserValuesAreData:
+    """User-supplied strings reach the job as environment, never as code."""
+
+    @pytest.mark.parametrize("output_dir", HOSTILE)
+    @pytest.mark.parametrize(("create", "kwargs"), CHECKPOINT_WRITERS)
+    def test_output_dir_is_never_interpolated(
+        self, create: Callable[..., sky.Task], kwargs: dict[str, Any], output_dir: str
+    ) -> None:
+        """Spaces, quotes and shell syntax stay inert."""
+        task = create(output_dir=output_dir, **kwargs)
+
+        assert task.envs["VIBEML_OUTPUT_DIR"] == output_dir
+        assert output_dir not in str(task.setup)
+        assert output_dir not in _run(task)
+
+    def test_model_and_dataset_are_never_interpolated(self) -> None:
+        """Model and dataset IDs are passed as environment too."""
+        dataset = "evil'); __import__('os').system('id'); ('"
+        task = create_unsloth_task(model="org/model", dataset=dataset)
+
+        assert task.envs["VIBEML_MODEL"] == "org/model"
+        assert task.envs["VIBEML_DATASET"] == dataset
+        assert dataset not in _run(task)
+        assert "org/model" not in _run(task)
+
+
+def test_dependency_installs_run_under_the_cost_timer() -> None:
+    """SkyPilot arms autostop after setup, so slow installs belong in run."""
+    task = create_unsloth_task(model="org/model", dataset="d", cloud_bucket="ckpts")
+
+    assert "pip install" not in str(task.setup or "")
+    assert "pip install" in _run(task)
 
 
 class TestBuildTask:

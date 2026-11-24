@@ -21,6 +21,10 @@ from ..models import JobStatus
 
 T = TypeVar("T")
 
+# First SkyPilot API version that honours autostop ``wait_for``; older servers
+# silently drop it, which would turn the runtime cap into an idle-only cap.
+_MIN_API_VERSION_FOR_WAIT_FOR = 13
+
 _JOB_STATUS = {
     sky.ClusterStatus.INIT: JobStatus.PENDING,
     sky.ClusterStatus.PENDING: JobStatus.PENDING,
@@ -159,7 +163,18 @@ async def launch(
             "down": True,
             "wait_for": AutostopWaitFor.NONE,
         }
-    request_id = await _call(lambda: sky.launch(task, cluster_name=cluster_name, **cap))
+
+    def submit() -> Any:
+        if cap:
+            api_version = int(sky.api_info().api_version)
+            if api_version < _MIN_API_VERSION_FOR_WAIT_FOR:
+                raise SkyPilotError(
+                    f"SkyPilot API server version {api_version} cannot enforce a runtime "
+                    f"cap (needs >= {_MIN_API_VERSION_FOR_WAIT_FOR}); not launched."
+                )
+        return sky.launch(task, cluster_name=cluster_name, **cap)
+
+    request_id = await _call(submit)
     return str(request_id)
 
 

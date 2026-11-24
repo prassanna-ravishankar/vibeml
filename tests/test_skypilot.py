@@ -49,6 +49,7 @@ def sdk() -> Any:
         mock_sky.status.return_value = "req-status"
         mock_sky.launch.return_value = "req-launch"
         mock_sky.down.return_value = "req-down"
+        mock_sky.api_info.return_value.api_version = "13"
         yield mock_sky
 
 
@@ -193,6 +194,19 @@ class TestLaunch:
             down=True,
             wait_for=AutostopWaitFor.NONE,
         )
+
+    async def test_runtime_cap_fails_closed_on_old_api_server(
+        self, sdk: MagicMock
+    ) -> None:
+        """Old API servers drop wait_for, so a capped launch must not proceed."""
+        sdk.api_info.return_value.api_version = "12"
+
+        with pytest.raises(SkyPilotError, match="API server"):
+            await skypilot.launch(
+                sky.Task(run="echo hi"), cluster_name="vibeml-a", max_minutes=60
+            )
+
+        sdk.launch.assert_not_called()
 
     async def test_submit_failure_raises(self, sdk: MagicMock) -> None:
         """A rejected submission surfaces as SkyPilotError."""

@@ -55,7 +55,7 @@ async def launch_training(
     dataset: str = "tatsu-lab/alpaca",
     gpu_type: str | None = None,
     max_steps: int | None = 60,
-    max_cost: float | None = None,
+    max_cost: Annotated[float | None, Field(ge=0, allow_inf_nan=False)] = None,
     learning_rate: float | None = None,
     lora_r: int | None = None,
     max_seq_length: int | None = None,
@@ -134,6 +134,12 @@ async def launch_training(
                 "estimated_cost": expected,
             }
         max_minutes = estimator.affordable_minutes(task, max_cost)
+        if max_minutes < 1:
+            # SkyPilot's autostop granularity is one minute; less cannot be enforced.
+            return _error(
+                "over_budget",
+                f"max_cost ${max_cost:.2f} buys less than one minute; not launched.",
+            )
 
     cluster_id = f"{CLUSTER_PREFIX}{workflow}-{uuid.uuid4().hex[:8]}"
     try:
