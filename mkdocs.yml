@@ -1,7 +1,7 @@
 site_name: VibeML
 site_description: Conversational AI model training on multi-cloud GPU resources
 site_author: Prass, The Nomadic Coder
-site_url: https://vibeml.readthedocs.io
+site_url: https://prassanna.io/vibeml
 repo_url: https://github.com/prassanna-ravishankar/vibeml
 repo_name: prassanna-ravishankar/vibeml
 edit_uri: edit/main/docs/

@@ -7,7 +7,7 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/vibeml)][pypi status]
 [![License](https://img.shields.io/pypi/l/vibeml)][license]
 
-[![Read the documentation at https://vibeml.readthedocs.io/](https://img.shields.io/readthedocs/vibeml/latest.svg?label=Read%20the%20Docs)][read the docs]
+[![Documentation](https://github.com/prassanna-ravishankar/vibeml/actions/workflows/docs.yml/badge.svg)][docs]
 [![Tests](https://github.com/prassanna-ravishankar/vibeml/workflows/Tests/badge.svg)][tests]
 [![Codecov](https://codecov.io/gh/prassanna-ravishankar/vibeml/branch/main/graph/badge.svg)][codecov]
 
@@ -15,7 +15,7 @@
 [![Ruff codestyle][ruff badge]][ruff project]
 
 [pypi status]: https://pypi.org/project/vibeml/
-[read the docs]: https://vibeml.readthedocs.io/
+[docs]: https://prassanna.io/vibeml/
 [tests]: https://github.com/prassanna-ravishankar/vibeml/actions?workflow=Tests
 [codecov]: https://app.codecov.io/gh/prassanna-ravishankar/vibeml
 [pre-commit]: https://github.com/pre-commit/pre-commit
@@ -78,12 +78,12 @@ Please see the [Command-line Reference] for details.
 
 ## 📚 Documentation
 
-Comprehensive documentation is available at [vibeml.readthedocs.io](https://vibeml.readthedocs.io/):
+Documentation is available at [prassanna.io/vibeml](https://prassanna.io/vibeml/):
 
-- **[Get Started](https://vibeml.readthedocs.io/en/latest/get-started/)** - Installation and quick start guide
-- **[Concepts](https://vibeml.readthedocs.io/en/latest/concepts/)** - Architecture and core concepts
-- **[How-to Guides](https://vibeml.readthedocs.io/en/latest/how-to/)** - Practical task-oriented guides
-- **[API Reference](https://vibeml.readthedocs.io/en/latest/reference/)** - Complete CLI and Python API documentation
+- **[Get Started](https://prassanna.io/vibeml/get-started/)** - Installation and quick start guide
+- **[Concepts](https://prassanna.io/vibeml/concepts/)** - Architecture and core concepts
+- **[How-to Guides](https://prassanna.io/vibeml/how-to/)** - Practical task-oriented guides
+- **[API Reference](https://prassanna.io/vibeml/reference/)** - Complete CLI and Python API documentation
 
 ### Building Documentation Locally
 
@@ -161,4 +161,4 @@ This project was generated from [@cjolowicz]'s [uv hypermodern python cookiecutt
 
 [license]: https://github.com/prassanna-ravishankar/vibeml/blob/main/LICENSE
 [contributor guide]: https://github.com/prassanna-ravishankar/vibeml/blob/main/CONTRIBUTING.md
-[command-line reference]: https://vibeml.readthedocs.io/en/latest/usage.html
+[command-line reference]: https://prassanna.io/vibeml/reference/cli/
