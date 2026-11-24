@@ -1,9 +1,10 @@
 """Adapter over SkyPilot's request-based client SDK.
 
-Every SkyPilot SDK call submits a request to the SkyPilot API server and returns
-a request ID; ``sky.get`` blocks until the request finishes. This module owns
-that protocol and translates SkyPilot's records into vibeml's types, so callers
-never handle request IDs, blocking calls, or SkyPilot enums directly.
+Most SkyPilot SDK calls submit a request to the SkyPilot API server and return
+a request ID; ``sky.get`` blocks until the request finishes. (``download_logs``
+resolves its request internally and returns the result.) This module owns that
+protocol and translates SkyPilot's records into vibeml's types, so callers never
+handle request IDs, blocking calls, or SkyPilot enums directly.
 """
 
 import asyncio
@@ -53,6 +54,9 @@ def to_job_status(cluster_status: sky.ClusterStatus) -> JobStatus:
 async def _call(fn: Callable[[], T]) -> T:
     """Run a blocking SDK call in a worker thread, wrapping its errors.
 
+    Translation of SkyPilot records belongs inside ``fn`` too, so an
+    unexpected record shape is reported as a SkyPilot error.
+
     Args:
         fn: Zero-argument callable that performs the SDK call.
 
@@ -99,12 +103,15 @@ async def get_cluster(name: str) -> ClusterInfo | None:
     Returns:
         The cluster, or None if SkyPilot does not know it.
     """
-    records = await _call(
-        lambda: sky.get(
-            sky.status(cluster_names=[name], refresh=sky.StatusRefreshMode.AUTO)
-        )
+    clusters = await _call(
+        lambda: [
+            _to_cluster_info(r)
+            for r in sky.get(
+                sky.status(cluster_names=[name], refresh=sky.StatusRefreshMode.AUTO)
+            )
+        ]
     )
-    return _to_cluster_info(records[0]) if records else None
+    return clusters[0] if clusters else None
 
 
 async def list_clusters(prefix: str) -> list[ClusterInfo]:
@@ -116,10 +123,13 @@ async def list_clusters(prefix: str) -> list[ClusterInfo]:
     Returns:
         Matching clusters, in SkyPilot's order.
     """
-    records = await _call(
-        lambda: sky.get(sky.status(refresh=sky.StatusRefreshMode.AUTO))
+    return await _call(
+        lambda: [
+            _to_cluster_info(r)
+            for r in sky.get(sky.status(refresh=sky.StatusRefreshMode.AUTO))
+            if r.name.startswith(prefix)
+        ]
     )
-    return [_to_cluster_info(r) for r in records if r.name.startswith(prefix)]
 
 
 async def launch(task: sky.Task, cluster_name: str) -> str:

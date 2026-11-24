@@ -7,14 +7,18 @@ tool arguments and vibeml's own layers. Task construction lives in
 """
 
 import logging
+import os
+import sys
 import uuid
-from typing import Any
+from typing import Annotated, Any, TextIO
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
 from .cloud import CostEstimator, skypilot
-from .exceptions import SkyPilotError, ValidationError
+from .exceptions import SkyPilotError, TaskGenerationError, ValidationError
 from .models import JobStatus, TrainingRequest
 from .tasks import WORKFLOWS, build_task
 
@@ -95,6 +99,8 @@ async def launch_training(
         task = build_task(workflow, model, dataset, gpu_type, **hyperparameters)
     except (PydanticValidationError, ValidationError) as e:
         return _error("validation_error", str(e))
+    except TaskGenerationError as e:
+        return _error("task_generation_error", str(e))
 
     cluster_id = f"{CLUSTER_PREFIX}{workflow}-{uuid.uuid4().hex[:8]}"
     try:
@@ -118,13 +124,17 @@ async def launch_training(
 
 @mcp.tool()
 async def get_training_status(cluster_id: str) -> dict[str, Any]:
-    """Get the status of a training job.
+    """Get the status of a training job's cluster.
+
+    This is cluster status: "running" means the cluster is up, not that the
+    training script is still running. Use ``sky queue <cluster_id>`` for the
+    job itself.
 
     Args:
         cluster_id: The cluster ID returned from launch_training
 
     Returns:
-        Dict with the job status and SkyPilot's cluster status
+        Dict with the cluster's job status and SkyPilot's cluster status
     """
     try:
         cluster = await skypilot.get_cluster(cluster_id)
@@ -149,24 +159,45 @@ async def get_training_status(cluster_id: str) -> dict[str, Any]:
 async def stop_training(
     cluster_id: str, download_results: bool = True
 ) -> dict[str, Any]:
-    """Stop a training job, optionally downloading its logs first.
+    """Tear a training cluster down, optionally downloading its logs first.
+
+    Log download is best effort: a cluster that is not up (for example
+    stopped) has no logs to fetch, and a running cluster costs money, so
+    teardown always proceeds.
 
     Args:
         cluster_id: The cluster ID to stop
         download_results: Whether to download job logs before tearing down
 
     Returns:
-        Dict with stop status and the local log directories, if downloaded
+        Dict with stop status, the local log directories, and any log error
     """
     try:
         if await skypilot.get_cluster(cluster_id) is None:
             return _error("not_found", f"Cluster {cluster_id} not found")
-        log_paths = await skypilot.download_logs(cluster_id) if download_results else {}
-        await skypilot.down(cluster_id)
     except SkyPilotError as e:
         return _error("skypilot_error", str(e))
 
-    return {"status": "stopped", "cluster_id": cluster_id, "log_paths": log_paths}
+    result: dict[str, Any] = {
+        "status": "stopped",
+        "cluster_id": cluster_id,
+        "log_paths": {},
+    }
+    if download_results:
+        try:
+            result["log_paths"] = await skypilot.download_logs(cluster_id)
+        except SkyPilotError as e:
+            logger.warning("Log download for %s failed: %s", cluster_id, e)
+            result["log_error"] = str(e)
+
+    try:
+        await skypilot.down(cluster_id)
+    except SkyPilotError as e:
+        return _error(
+            "skypilot_error",
+            f"Teardown of {cluster_id} failed; it may still be running: {e}",
+        )
+    return result
 
 
 @mcp.tool()
@@ -208,7 +239,7 @@ async def estimate_training_cost(
     model: str = "mistralai/Mistral-7B-v0.1",
     dataset: str = "tatsu-lab/alpaca",
     gpu_type: str | None = None,
-    estimated_hours: float = 4.0,
+    estimated_hours: Annotated[float, Field(gt=0)] = 4.0,
 ) -> dict[str, Any]:
     """Estimate the cost of a training job before launching.
 
@@ -228,6 +259,8 @@ async def estimate_training_cost(
         task = build_task(workflow, model, dataset, gpu_type)
     except ValidationError as e:
         return _error("validation_error", str(e))
+    except TaskGenerationError as e:
+        return _error("task_generation_error", str(e))
 
     (resources,) = task.resources
     ((gpu, per_node),) = resources.accelerators.items()
@@ -277,11 +310,54 @@ async def list_active_training_jobs() -> dict[str, Any]:
     return {"active_jobs": jobs, "count": len(jobs)}
 
 
+class _ReleaseStdout(Middleware):
+    """Point ``sys.stdout`` back at the console once the transport is bound.
+
+    Initialize is the first message of every MCP session, so no tool (and no
+    SkyPilot call) can run before this.
+    """
+
+    def __init__(self, console: TextIO) -> None:
+        """Remember the console stream to restore.
+
+        Args:
+            console: Stream that call-time ``print()`` should use.
+        """
+        self._console = console
+
+    async def on_initialize(
+        self, context: MiddlewareContext[Any], call_next: CallNext[Any, Any]
+    ) -> Any:
+        """Restore the console stream, then continue initialization.
+
+        Args:
+            context: Middleware context.
+            call_next: Next handler in the chain.
+
+        Returns:
+            The initialize result.
+        """
+        sys.stdout = self._console
+        return await call_next(context)
+
+
 def run_server() -> None:
     """Run the MCP server over stdio.
 
-    Stdout carries the MCP protocol, so diagnostics go to stderr via logging.
+    Stdout belongs to the MCP protocol, but SkyPilot writes to it: it prints
+    streamed request logs and its logging handler targets ``sys.stdout``. So
+    file descriptor 1 is pointed at stderr for the whole process, and the
+    transport gets a private duplicate of the real stdout.
     """
     logging.basicConfig(level=logging.INFO)
+    console = sys.stdout
+    console.flush()
+    protocol = os.fdopen(os.dup(console.fileno()), "w", encoding="utf-8")
+    os.dup2(sys.stderr.fileno(), console.fileno())
+
+    # The stdio transport binds sys.stdout when it starts; afterwards
+    # _ReleaseStdout hands sys.stdout back to the (now stderr-backed) console.
+    sys.stdout = protocol
+    mcp.add_middleware(_ReleaseStdout(console))
     logger.info("Available workflows: %s", ", ".join(WORKFLOWS))
     mcp.run()

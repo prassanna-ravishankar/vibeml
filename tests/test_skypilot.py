@@ -1,5 +1,7 @@
 """Tests for the SkyPilot adapter, against mocked request-based SDK responses."""
 
+import asyncio
+import threading
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -40,7 +42,7 @@ def sdk() -> Any:
 
     Every SDK call returns a request ID; ``sky.get`` resolves it.
     """
-    with patch.object(skypilot, "sky") as mock_sky:
+    with patch.object(skypilot, "sky", autospec=True) as mock_sky:
         mock_sky.ClusterStatus = sky.ClusterStatus
         mock_sky.StatusRefreshMode = sky.StatusRefreshMode
         mock_sky.status.return_value = "req-status"
@@ -99,6 +101,42 @@ class TestGetCluster:
         sdk.get.return_value = []
 
         assert await skypilot.get_cluster("vibeml-missing") is None
+
+    async def test_missing_launch_time(self, sdk: MagicMock) -> None:
+        """A cluster that never launched has no launch time."""
+        record = status_response("vibeml-a", sky.ClusterStatus.INIT)
+        record.launched_at = 0
+        sdk.get.return_value = [record]
+
+        info = await skypilot.get_cluster("vibeml-a")
+
+        assert info is not None
+        assert info.launched_at is None
+
+    async def test_unexpected_record_shape_raises(self, sdk: MagicMock) -> None:
+        """A record vibeml cannot translate is an SDK error, not a crash."""
+        sdk.get.return_value = [object()]
+
+        with pytest.raises(SkyPilotError):
+            await skypilot.get_cluster("vibeml-a")
+
+    async def test_blocking_call_does_not_block_event_loop(
+        self, sdk: MagicMock
+    ) -> None:
+        """SDK calls block on the API server, so they run off the event loop."""
+        release = threading.Event()
+
+        def slow_get(request_id: str) -> list[StatusResponse]:
+            release.wait(timeout=5)
+            return []
+
+        sdk.get.side_effect = slow_get
+        lookup = asyncio.create_task(skypilot.get_cluster("vibeml-a"))
+        await asyncio.sleep(0.05)  # the loop keeps running while the SDK blocks
+        assert not lookup.done()
+        release.set()
+
+        assert await lookup is None
 
     async def test_sdk_failure_raises(self, sdk: MagicMock) -> None:
         """SDK errors surface as SkyPilotError, not as 'not found'."""

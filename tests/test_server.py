@@ -6,10 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 from vibeml import server
 from vibeml.cloud.skypilot import ClusterInfo
-from vibeml.exceptions import SkyPilotError
+from vibeml.exceptions import SkyPilotError, TaskGenerationError
 from vibeml.models import JobStatus
 
 LAUNCHED_AT = datetime(2026, 11, 24, 9, 0, tzinfo=timezone.utc)
@@ -89,6 +90,20 @@ class TestLaunchTraining:
         adapter.launch.assert_not_called()
         assert result["status"] == "error"
 
+    async def test_task_generation_failure_is_reported(self, adapter: Any) -> None:
+        """Task construction errors use the same error envelope."""
+        with patch.object(
+            server, "build_task", side_effect=TaskGenerationError("bad template")
+        ):
+            result = await call("launch_training")
+
+        adapter.launch.assert_not_called()
+        assert result == {
+            "status": "error",
+            "error": "task_generation_error",
+            "message": "bad template",
+        }
+
     async def test_sdk_failure_is_reported(self, adapter: Any) -> None:
         """A failed submission is returned as an error, not raised."""
         adapter.launch.side_effect = SkyPilotError("no credentials")
@@ -132,7 +147,7 @@ class TestStopTraining:
     """stop_training optionally downloads logs, then tears the cluster down."""
 
     async def test_downloads_logs_then_tears_down(self, adapter: Any) -> None:
-        """Log paths are those SkyPilot reports."""
+        """Logs are fetched before teardown; paths are those SkyPilot reports."""
         adapter.get_cluster.return_value = cluster("vibeml-a", JobStatus.RUNNING, "UP")
         adapter.download_logs.return_value = {"1": "/logs/vibeml-a/1"}
 
@@ -145,6 +160,30 @@ class TestStopTraining:
             "cluster_id": "vibeml-a",
             "log_paths": {"1": "/logs/vibeml-a/1"},
         }
+
+    async def test_tears_down_even_if_logs_fail(self, adapter: Any) -> None:
+        """Log download is best effort; a running cluster costs money."""
+        adapter.get_cluster.return_value = cluster(
+            "vibeml-a", JobStatus.TERMINATED, "STOPPED"
+        )
+        adapter.download_logs.side_effect = SkyPilotError("cluster is not up")
+
+        result = await call("stop_training", cluster_id="vibeml-a")
+
+        adapter.down.assert_awaited_once_with("vibeml-a")
+        assert result["status"] == "stopped"
+        assert result["log_paths"] == {}
+        assert result["log_error"] == "cluster is not up"
+
+    async def test_teardown_failure_is_reported(self, adapter: Any) -> None:
+        """If teardown fails, the caller is told the cluster may still be running."""
+        adapter.get_cluster.return_value = cluster("vibeml-a", JobStatus.RUNNING, "UP")
+        adapter.down.side_effect = SkyPilotError("cloud API timeout")
+
+        result = await call("stop_training", cluster_id="vibeml-a")
+
+        assert result["status"] == "error"
+        assert result["error"] == "skypilot_error"
 
     async def test_skips_logs_when_asked(self, adapter: Any) -> None:
         """download_results=False tears down without fetching logs."""
@@ -213,6 +252,12 @@ class TestEstimateTrainingCost:
         assert result["gpu_count"] == 32
         assert result["use_spot"] is False
         assert result["expected_cost"] == pytest.approx(3.5 * 32)
+
+    async def test_rejects_non_positive_hours(self) -> None:
+        """Duration must be positive."""
+        async with Client(server.mcp) as client:
+            with pytest.raises(ToolError):
+                await client.call_tool("estimate_training_cost", {"estimated_hours": 0})
 
     async def test_unknown_workflow(self) -> None:
         """Unknown workflows are reported, not priced."""
