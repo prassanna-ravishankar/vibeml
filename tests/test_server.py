@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ValidationError as FastMCPValidationError
 from pydantic import ValidationError as PydanticValidationError
 
 from vibeml import server
@@ -157,7 +158,10 @@ class TestCostGuard:
         tool = await server.mcp.get_tool("launch_training")
         assert tool is not None
 
-        with pytest.raises(PydanticValidationError, match="finite"):
+        # FastMCP may surface argument validation as its own ValidationError.
+        with pytest.raises(
+            (PydanticValidationError, FastMCPValidationError), match="finite"
+        ):
             await tool.run({"max_cost": float("inf")})
 
         adapter.launch.assert_not_called()

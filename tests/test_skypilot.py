@@ -306,9 +306,10 @@ class TestLaunch:
         sdk.get.side_effect = get
 
         launch = await skypilot.launch(sky.Task(run="echo hi"), cluster_name="vibeml-a")
-        with pytest.raises(TimeoutError):
+        # asyncio.TimeoutError: on Python 3.10 it is not yet the builtin.
+        with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(launch.settled, timeout=0.05)
-        with pytest.raises(TimeoutError):
+        with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(skypilot.settle_all(), timeout=0.05)
         release.set()
         await skypilot.settle_all()
